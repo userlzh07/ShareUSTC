@@ -1,47 +1,190 @@
 use actix_cors::Cors;
-use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{middleware::Logger, get, web, App, HttpResponse, HttpServer, Responder};
 use serde::Serialize;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use uuid::Uuid;
+
+mod config;
+mod api;
+mod models;
+mod utils;
+mod services;
+mod middleware;
+mod db;
+mod repositories;
+
+use db::AppState;
+use middleware::JwtAuth;
 
 #[derive(Serialize)]
 struct HelloResponse {
     message: String,
-}
-
-// 共享状态结构体
-struct AppState {
-    counter: AtomicUsize,
+    status: String,
 }
 
 #[get("/api/hello")]
 async fn hello(data: web::Data<AppState>) -> impl Responder {
-    let count = data.counter.fetch_add(1, Ordering::SeqCst);
+    // 测试数据库连接
+    let result: Result<(i32,), sqlx::Error> = sqlx::query_as("SELECT 1")
+        .fetch_one(&data.pool)
+        .await;
+
+    let db_status = match result {
+        Ok(_) => "connected",
+        Err(_) => "disconnected",
+    };
+
     HttpResponse::Ok().json(HelloResponse {
-        message: format!("Hello from Rust backend! Request count: {}", count + 1),
+        message: format!("Hello from Rust backend! DB: {}", db_status),
+        status: "ok".to_string(),
     })
+}
+
+#[get("/api/health")]
+async fn health_check() -> impl Responder {
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": "healthy",
+        "service": "ShareUSTC Backend"
+    }))
+}
+
+/// 获取图片文件（公开访问）
+#[get("/images/{image_id}")]
+async fn serve_image(
+    data: web::Data<AppState>,
+    path: web::Path<Uuid>,
+) -> impl Responder {
+    let image_id = path.into_inner();
+
+    // 从数据库获取图片路径
+    match services::ImageService::get_image_path(&data.pool, image_id).await {
+        Ok((file_path, mime_type)) => {
+            match tokio::fs::read(&file_path).await {
+                Ok(file_content) => {
+                    // 根据MIME类型设置Content-Type
+                    let content_type = mime_type
+                        .map(|m| m.parse::<mime::Mime>().ok())
+                        .flatten()
+                        .unwrap_or(mime::APPLICATION_OCTET_STREAM);
+
+                    HttpResponse::Ok()
+                        .content_type(content_type)
+                        .body(file_content)
+                }
+                Err(e) => {
+                    log::warn!("无法读取图片文件 {}: {}", file_path, e);
+                    HttpResponse::NotFound().json(serde_json::json!({
+                        "code": 404,
+                        "message": "图片文件不存在",
+                        "data": null
+                    }))
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("获取图片路径失败: {}", e);
+            HttpResponse::NotFound().json(serde_json::json!({
+                "code": 404,
+                "message": "图片不存在",
+                "data": null
+            }))
+        }
+    }
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("Starting server at http://localhost:8080");
+    // 加载环境变量
+    dotenvy::dotenv().ok();
 
-    // 创建应用状态
-    let app_state = web::Data::new(AppState {
-        counter: AtomicUsize::new(0),
+    // 初始化日志系统
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "backend=debug,actix_web=info,sqlx=warn");
+    }
+    env_logger::init();
+
+    // 读取配置
+    let host = std::env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port = std::env::var("SERVER_PORT").unwrap_or_else(|_| "8080".to_string());
+    let server_addr = format!("{}:{}", host, port);
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key".to_string());
+
+    // 确保上传目录存在
+    let upload_dir = std::env::var("IMAGE_UPLOAD_PATH")
+        .unwrap_or_else(|_| "./uploads/images".to_string());
+    std::fs::create_dir_all(&upload_dir).unwrap_or_else(|e| {
+        log::warn!("创建上传目录失败: {}", e);
     });
 
+    log::info!("Starting ShareUSTC backend server...");
+    log::info!("Server address: http://{}", server_addr);
+    log::info!("Image upload directory: {}", upload_dir);
+
+    // 创建数据库连接池
+    let pool = match db::create_pool_from_env().await {
+        Ok(pool) => {
+            log::info!("数据库连接池创建成功");
+            pool
+        }
+        Err(e) => {
+            log::error!("数据库连接失败: {}", e);
+            log::warn!("请检查 DATABASE_URL 环境变量是否正确设置");
+            log::warn!("示例: DATABASE_URL=postgres://username:password@localhost:5432/shareustc");
+            std::process::exit(1);
+        }
+    };
+
+    // 创建应用状态
+    let app_state = web::Data::new(AppState::new(pool, jwt_secret.clone()));
+
+    log::info!("Server starting at http://{}", server_addr);
+    log::debug!("Debug logging enabled");
+    log::debug!("API endpoints:");
+    log::debug!("  POST /api/auth/register - 用户注册");
+    log::debug!("  POST /api/auth/login    - 用户登录");
+    log::debug!("  POST /api/auth/refresh  - 刷新Token");
+    log::debug!("  POST /api/auth/logout   - 用户登出");
+    log::debug!("  GET  /api/users/me      - 获取当前用户");
+    log::debug!("  PUT  /api/users/me      - 更新用户资料");
+    log::debug!("  POST /api/users/verify  - 实名认证");
+    log::debug!("  GET  /api/users/:id     - 获取用户资料");
+    log::debug!("  POST /api/images/upload - 上传图片");
+    log::debug!("  GET  /api/images        - 获取我的图片列表");
+    log::debug!("  GET  /api/images/:id    - 获取图片信息");
+    log::debug!("  DEL  /api/images/:id    - 删除图片");
+    log::debug!("  GET  /images/:id        - 访问图片文件（公开）");
+    log::debug!("  GET  /api/health        - 健康检查");
+    log::debug!("  GET  /api/hello         - 测试接口");
+
     HttpServer::new(move || {
+        let jwt_auth = JwtAuth::new(jwt_secret.clone());
+
         App::new()
-            .app_data(app_state.clone()) // 将状态传递给每个应用程序实例
+            .app_data(app_state.clone())
             .wrap(
                 Cors::default()
                     .allowed_origin("http://localhost:5173")
-                    .allowed_methods(vec!["GET", "POST"])
-                    .allowed_headers(vec!["Content-Type"])
+                    .allowed_origin("http://127.0.0.1:5173")
+                    .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+                    .allowed_headers(vec!["Content-Type", "Authorization", "Accept"])
+                    .supports_credentials()
+                    .max_age(3600)
             )
+            .wrap(Logger::new("%a %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" %T")
+                .log_target("backend::access"))
+            // 公开路由（不需要认证）
+            .configure(api::auth::config)
+            .service(serve_image)
+            .service(health_check)
             .service(hello)
+            // 需要认证的路由
+            .service(
+                web::scope("/api")
+                    .wrap(jwt_auth)
+                    .configure(api::user::config)
+                    .configure(api::image_host::config)
+            )
     })
-        .bind("127.0.0.1:8080")?
+        .bind(&server_addr)?
         .run()
         .await
 }

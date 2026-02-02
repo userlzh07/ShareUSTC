@@ -1,6 +1,7 @@
-backend/target/
-shared/dist/
+/backend/target/
+/shared/dist/
 *.log
 .env
 .idea
 .vscode
+/vibe

@@ -1,0 +1,99 @@
+import axios, { type AxiosError, type AxiosInstance, type AxiosResponse } from 'axios';
+import { useAuthStore } from '../stores/auth';
+import { ElMessage } from 'element-plus';
+import router from '../router';
+
+// 创建 axios 实例
+const request: AxiosInstance = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api',
+  timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+// 请求拦截器
+request.interceptors.request.use(
+  (config) => {
+    const authStore = useAuthStore();
+    const token = authStore.accessToken;
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, config.data);
+    return config;
+  },
+  (error) => {
+    console.error('[API Request Error]', error);
+    return Promise.reject(error);
+  }
+);
+
+// 响应拦截器
+request.interceptors.response.use(
+  (response: AxiosResponse) => {
+    console.log(`[API Response] ${response.config.url}`, response.data);
+
+    const { code, message, data } = response.data;
+
+    // 如果 code 不是 200，视为错误
+    if (code !== 200) {
+      ElMessage.error(message || '请求失败');
+      return Promise.reject(new Error(message));
+    }
+
+    return data;
+  },
+  async (error: AxiosError) => {
+    console.error('[API Error]', error);
+
+    const { response } = error;
+
+    if (response) {
+      const { status, data } = response as any;
+      const message = data?.message || '请求失败';
+
+      switch (status) {
+        case 401:
+          // Token 过期，尝试刷新
+          const authStore = useAuthStore();
+          const refreshed = await authStore.refreshAccessToken();
+
+          if (refreshed) {
+            // 刷新成功，重试原请求
+            const config = error.config;
+            if (config) {
+              config.headers.Authorization = `Bearer ${authStore.accessToken}`;
+              return request(config);
+            }
+          } else {
+            // 刷新失败，跳转到登录
+            ElMessage.error('登录已过期，请重新登录');
+            authStore.logoutUser();
+            router.push('/login');
+          }
+          break;
+        case 403:
+          ElMessage.error('没有权限访问');
+          break;
+        case 404:
+          ElMessage.error('请求的资源不存在');
+          break;
+        case 500:
+          ElMessage.error('服务器错误');
+          break;
+        default:
+          ElMessage.error(message);
+      }
+
+      return Promise.reject(new Error(message));
+    } else {
+      ElMessage.error('网络错误，请检查网络连接');
+      return Promise.reject(new Error('网络错误'));
+    }
+  }
+);
+
+export default request;
