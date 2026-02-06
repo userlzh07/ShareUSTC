@@ -1,27 +1,39 @@
 # 部署指南
 
+version 1.2
+
+2025/2/6/17:13
+
 以Ubuntu 25.10为例
 
 
 
-## 安装rust与npm
+## 安装npm与nodejs
 
 ```bash
-sudo apt install nodejs npm rustup
+sudo apt install npm
 ```
 
-重启终端以加载环境变量，然后安装rust相关的包：
+安装较新版本的nodejs：[教程](https://nodejs.cn/en/download)
+
+
+
+## 安装rust
 
 ```bash
-rustup-init
+sudo apt rustup pkg-config
+```
+
+重启终端以加载环境变量，然后安装rust：
+
+```bash
+rustup install stable
 rustup default stable
 ```
 
 
 
 ## 安装与初始化数据库
-
-首先在**根目录**打开终端
 
 安装postgresql：
 
@@ -57,7 +69,7 @@ GRANT ALL PRIVILEGES ON DATABASE shareustc TO shareustc_app;
 \q
 ```
 
-执行数据库初始化脚本：
+在项目**根目录**执行数据库初始化脚本：
 
 ```bash
 ./scripts/db_init_tables.sh
@@ -71,6 +83,7 @@ GRANT ALL PRIVILEGES ON DATABASE shareustc TO shareustc_app;
 
 ```bash
 cd frontend/
+npm install
 npm run dev
 ```
 
