@@ -27,16 +27,16 @@
       </div>
 
       <div class="filter-row">
-        <el-select v-model="filterType" placeholder="资源类型" clearable class="filter-item">
+        <el-select v-model="filterType" placeholder="资源类型" clearable class="filter-item" :disabled="loading">
           <el-option
-            v-for="(label, value) in ResourceTypeLabels"
+            v-for="(label, value) in ResourceTypeFilterLabels"
             :key="value"
             :label="label"
             :value="value"
           />
         </el-select>
 
-        <el-select v-model="filterCategory" placeholder="资源分类" clearable class="filter-item">
+        <el-select v-model="filterCategory" placeholder="资源分类" clearable class="filter-item" :disabled="loading">
           <el-option
             v-for="(label, value) in ResourceCategoryLabels"
             :key="value"
@@ -45,18 +45,24 @@
           />
         </el-select>
 
-        <el-select v-model="sortBy" placeholder="排序方式" class="filter-item">
+        <el-select v-model="sortBy" placeholder="排序方式" class="filter-item" :disabled="loading">
           <el-option label="最新上传" value="created_at" />
           <el-option label="最多下载" value="downloads" />
           <el-option label="最多点赞" value="likes" />
           <el-option label="最高评分" value="rating" />
+          <el-option label="标题降序" value="title" />
         </el-select>
+
       </div>
     </el-card>
 
     <!-- 资源列表 -->
-    <div v-if="loading" class="resource-loading">
-      <el-skeleton :rows="5" animated />
+    <!-- 加载中遮罩层 -->
+    <div v-if="loading" class="resource-loading-overlay">
+      <div class="loading-content">
+        <el-icon class="loading-spinner"><Loading /></el-icon>
+        <p class="loading-text">加载中...</p>
+      </div>
     </div>
 
     <div v-else-if="resources.length === 0" class="resource-empty">
@@ -142,10 +148,11 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { Search, Upload, Reading, View, Download, Star } from '@element-plus/icons-vue';
+import { Search, Upload, Reading, View, Download, Star, Loading } from '@element-plus/icons-vue';
 import { getResourceList, searchResources } from '../../api/resource';
 import {
   ResourceTypeLabels,
+  ResourceTypeFilterLabels,
   ResourceCategoryLabels,
   type ResourceListItem,
   type ResourceCategoryType
@@ -164,7 +171,7 @@ const pageSize = ref(12);
 const searchQuery = ref('');
 const filterType = ref('');
 const filterCategory = ref('');
-const sortBy = ref<'created_at' | 'downloads' | 'likes' | 'rating'>('created_at');
+const sortBy = ref<'created_at' | 'downloads' | 'likes' | 'rating' | 'title'>('created_at');
 
 // 是否在搜索模式
 const isSearchMode = computed(() => searchQuery.value.trim().length > 0);
@@ -330,6 +337,54 @@ onMounted(() => {
 
 .filter-item {
   width: 180px;
+}
+
+/* 加载中遮罩层样式 */
+.resource-loading-overlay {
+  min-height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--el-fill-color-light);
+  border-radius: 8px;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.loading-spinner {
+  font-size: 48px;
+  color: var(--el-color-primary);
+  animation: spin 1s linear infinite;
+}
+
+.loading-text {
+  font-size: 16px;
+  color: var(--el-text-color-secondary);
+  margin: 0;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .resource-loading {

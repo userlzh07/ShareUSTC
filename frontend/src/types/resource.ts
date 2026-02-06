@@ -1,4 +1,4 @@
-// 资源类型
+// 资源类型（存储用）
 export const ResourceType = {
   WebMarkdown: 'web_markdown',
   Ppt: 'ppt',
@@ -15,6 +15,20 @@ export const ResourceType = {
 } as const;
 
 export type ResourceTypeType = typeof ResourceType[keyof typeof ResourceType];
+
+// 资源类型筛选选项（用于筛选下拉框，合并相关类型）
+export const ResourceTypeFilterOptions = {
+  ppt: 'ppt',           // PPT（包含 ppt 和 pptx）
+  doc: 'doc',           // Word 文档（包含 doc 和 docx）
+  pdf: 'pdf',           // PDF
+  image: 'image',       // 图片（包含 jpeg, jpg, png）
+  web_markdown: 'web_markdown', // 网页 Markdown
+  txt: 'txt',           // 文本文件
+  zip: 'zip',           // ZIP 压缩包
+  other: 'other'        // 其他
+} as const;
+
+export type ResourceTypeFilterType = typeof ResourceTypeFilterOptions[keyof typeof ResourceTypeFilterOptions];
 
 // 资源分类
 export const ResourceCategory = {
@@ -96,7 +110,7 @@ export interface ResourceListQuery {
   perPage?: number;
   resourceType?: string;
   category?: string;
-  sortBy?: 'created_at' | 'downloads' | 'likes' | 'rating';
+  sortBy?: 'created_at' | 'downloads' | 'likes' | 'rating' | 'title';
   sortOrder?: 'asc' | 'desc';
 }
 
@@ -129,7 +143,7 @@ export interface UploadResourceResponse {
   createdAt: string;
 }
 
-// 资源类型显示名称映射
+// 资源类型显示名称映射（用于显示单个资源的类型）
 export const ResourceTypeLabels: Record<ResourceTypeType, string> = {
   [ResourceType.WebMarkdown]: '网页 Markdown',
   [ResourceType.Ppt]: 'PPT',
@@ -143,6 +157,18 @@ export const ResourceTypeLabels: Record<ResourceTypeType, string> = {
   [ResourceType.Png]: 'PNG 图片',
   [ResourceType.Zip]: 'ZIP 压缩包',
   [ResourceType.Other]: '其他'
+};
+
+// 资源类型筛选显示名称映射（用于筛选下拉框，合并相关类型）
+export const ResourceTypeFilterLabels: Record<ResourceTypeFilterType, string> = {
+  ppt: 'PPT 演示文稿',
+  doc: 'Word 文档',
+  pdf: 'PDF 文档',
+  image: '图片',
+  web_markdown: '网页 Markdown',
+  txt: '文本文件',
+  zip: 'ZIP 压缩包',
+  other: '其他'
 };
 
 // 资源分类显示名称映射

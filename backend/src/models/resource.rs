@@ -338,6 +338,7 @@ pub struct ResourceListItem {
 
 /// 资源列表查询参数
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceListQuery {
     pub page: Option<i32>,
     pub per_page: Option<i32>,
@@ -349,6 +350,7 @@ pub struct ResourceListQuery {
 
 /// 资源搜索查询参数
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceSearchQuery {
     pub q: String,
     pub page: Option<i32>,

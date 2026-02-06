@@ -236,16 +236,26 @@ impl ResourceService {
 
         // 构建查询条件
         let mut conditions = vec!["r.audit_status = 'approved'".to_string()];
-        let mut params: Vec<String> = vec![];
+        let mut filter_params: Vec<String> = vec![];
 
+        // 处理资源类型筛选（支持合并类型）
         if let Some(ref resource_type) = query.resource_type {
-            conditions.push(format!("r.resource_type = ${}", params.len() + 1));
-            params.push(resource_type.clone());
+            let type_condition = match resource_type.as_str() {
+                "ppt" => "(r.resource_type = 'ppt' OR r.resource_type = 'pptx')".to_string(),
+                "image" => "(r.resource_type = 'jpeg' OR r.resource_type = 'jpg' OR r.resource_type = 'png')".to_string(),
+                "doc" => "(r.resource_type = 'doc' OR r.resource_type = 'docx')".to_string(),
+                _ => {
+                    let param_idx = filter_params.len() + 1;
+                    filter_params.push(resource_type.clone());
+                    format!("r.resource_type = ${}", param_idx)
+                }
+            };
+            conditions.push(type_condition);
         }
 
         if let Some(ref category) = query.category {
-            conditions.push(format!("r.category = ${}", params.len() + 1));
-            params.push(category.clone());
+            conditions.push(format!("r.category = ${}", filter_params.len() + 1));
+            filter_params.push(category.clone());
         }
 
         let where_clause = conditions.join(" AND ");
@@ -255,6 +265,7 @@ impl ResourceService {
             Some("downloads") => "rs.downloads",
             Some("likes") => "rs.likes",
             Some("rating") => "rs.avg_quality",
+            Some("title") => "r.title",
             _ => "r.created_at",
         };
         let sort_order = match query.sort_order.as_deref() {
@@ -262,18 +273,23 @@ impl ResourceService {
             _ => "DESC",
         };
 
-        // 获取总数
+        // 获取总数 - 需要绑定过滤参数
         let count_query = format!(
             "SELECT COUNT(*) FROM resources r WHERE {}",
             where_clause
         );
 
-        let total: i64 = sqlx::query_scalar(&count_query)
+        let mut count_sql = sqlx::query_scalar(&count_query);
+        for param in &filter_params {
+            count_sql = count_sql.bind(param);
+        }
+
+        let total: i64 = count_sql
             .fetch_one(pool)
             .await
             .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
-        // 获取资源列表
+        // 获取资源列表 - 需要绑定过滤参数 + 分页参数
         let list_query = format!(
             r#"
             SELECT r.*, rs.views, rs.downloads, rs.likes, rs.avg_difficulty,
@@ -289,11 +305,17 @@ impl ResourceService {
             where_clause,
             sort_by,
             sort_order,
-            params.len() + 1,
-            params.len() + 2
+            filter_params.len() + 1,
+            filter_params.len() + 2
         );
 
-        let rows = sqlx::query(&list_query)
+        let mut list_sql = sqlx::query(&list_query);
+        // 先绑定过滤参数
+        for param in &filter_params {
+            list_sql = list_sql.bind(param);
+        }
+        // 再绑定分页参数
+        let rows = list_sql
             .bind(per_page as i64)
             .bind(offset as i64)
             .fetch_all(pool)
@@ -348,22 +370,54 @@ impl ResourceService {
 
         let search_pattern = format!("%{}%", query.q);
 
+        // 构建查询条件
+        let mut conditions = vec![
+            "r.audit_status = 'approved'".to_string(),
+            "(r.title ILIKE $1 OR r.course_name ILIKE $1)".to_string()
+        ];
+        let mut filter_params: Vec<String> = vec![];
+
+        // 处理资源类型筛选（支持合并类型）
+        if let Some(ref resource_type) = query.resource_type {
+            let type_condition = match resource_type.as_str() {
+                "ppt" => "(r.resource_type = 'ppt' OR r.resource_type = 'pptx')".to_string(),
+                "image" => "(r.resource_type = 'jpeg' OR r.resource_type = 'jpg' OR r.resource_type = 'png')".to_string(),
+                "doc" => "(r.resource_type = 'doc' OR r.resource_type = 'docx')".to_string(),
+                _ => {
+                    let param_idx = filter_params.len() + 2; // +2 because $1 is search_pattern
+                    filter_params.push(resource_type.clone());
+                    format!("r.resource_type = ${}", param_idx)
+                }
+            };
+            conditions.push(type_condition);
+        }
+
+        if let Some(ref category) = query.category {
+            let param_idx = filter_params.len() + 2;
+            filter_params.push(category.clone());
+            conditions.push(format!("r.category = ${}", param_idx));
+        }
+
+        let where_clause = conditions.join(" AND ");
+
         // 获取总数
-        let total: i64 = sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM resources r
-            WHERE r.audit_status = 'approved'
-            AND (r.title ILIKE $1 OR r.course_name ILIKE $1)
-            "#
-        )
-        .bind(&search_pattern)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+        let count_query = format!(
+            "SELECT COUNT(*) FROM resources r WHERE {}",
+            where_clause
+        );
+
+        let mut count_sql = sqlx::query_scalar(&count_query).bind(&search_pattern);
+        for param in &filter_params {
+            count_sql = count_sql.bind(param);
+        }
+
+        let total: i64 = count_sql
+            .fetch_one(pool)
+            .await
+            .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
         // 获取搜索结果
-        let rows = sqlx::query(
+        let list_query = format!(
             r#"
             SELECT r.*, rs.views, rs.downloads, rs.likes, rs.avg_difficulty,
                    rs.avg_quality, rs.avg_detail, rs.rating_count,
@@ -371,18 +425,26 @@ impl ResourceService {
             FROM resources r
             LEFT JOIN resource_stats rs ON r.id = rs.resource_id
             LEFT JOIN users u ON r.uploader_id = u.id
-            WHERE r.audit_status = 'approved'
-            AND (r.title ILIKE $1 OR r.course_name ILIKE $1)
+            WHERE {}
             ORDER BY r.created_at DESC
-            LIMIT $2 OFFSET $3
-            "#
-        )
-        .bind(&search_pattern)
-        .bind(per_page as i64)
-        .bind(offset as i64)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+            LIMIT ${} OFFSET ${}
+            "#,
+            where_clause,
+            filter_params.len() + 2,
+            filter_params.len() + 3
+        );
+
+        let mut list_sql = sqlx::query(&list_query).bind(&search_pattern);
+        for param in &filter_params {
+            list_sql = list_sql.bind(param);
+        }
+
+        let rows = list_sql
+            .bind(per_page as i64)
+            .bind(offset as i64)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
         let mut resources = Vec::new();
         for row in rows {

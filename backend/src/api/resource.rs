@@ -174,6 +174,9 @@ pub async fn get_resource_list(
     state: web::Data<AppState>,
     query: web::Query<ResourceListQuery>,
 ) -> impl Responder {
+    // TODO: 以下延迟仅用于测试加载效果，生产环境请删除
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
     match ResourceService::get_resource_list(&state.pool, &query).await {
         Ok(response) => HttpResponse::Ok().json(serde_json::json!({
             "code": 200,
@@ -197,6 +200,9 @@ pub async fn search_resources(
     state: web::Data<AppState>,
     query: web::Query<ResourceSearchQuery>,
 ) -> impl Responder {
+    // TODO: 以下延迟仅用于测试加载效果，生产环境请删除
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
     // 验证搜索关键词
     if query.q.trim().is_empty() {
         return HttpResponse::Ok().json(serde_json::json!({
