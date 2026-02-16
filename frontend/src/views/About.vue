@@ -153,9 +153,9 @@
       <section class="section">
         <h2>联系我们</h2>
         <p>
-          如有任何问题或建议，欢迎通过 GitHub Issues 与我们交流。或添加企鹅群
+          如有任何问题或建议，欢迎通过 GitHub Issues 与我们交流，也可以添加企鹅群联系我们
           <span class="qq-group" @click="copyQQGroup">1084014548</span>
-          。
+          （点击复制）。
         </p>
       </section>
     </div>

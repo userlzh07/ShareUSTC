@@ -1,28 +1,92 @@
 #!/usr/bin/env python3
 """
-ShareUSTC Database Table Initialization Script
-Cross-platform: Works on Windows, Linux, macOS
+ShareUSTC 数据库初始化脚本
+跨平台: 支持 Windows, Linux, macOS
+功能: 包含数据库创建和表创建两部分功能
 """
 
 import subprocess
 import sys
 import os
 import tempfile
+import platform
 
-# Configuration
+# ============================================
+# 配置变量
+# ============================================
 DB_NAME = "shareustc"
 DB_USER = "shareustc_app"
-DB_PASSWORD = "114514"
+DB_PASSWORD = "ShareUSTC_default_pwd"  # 生产环境请修改此密码
 DB_HOST = "localhost"
 DB_PORT = "5432"
+POSTGRES_USER = "postgres"  # PostgreSQL 超级用户
 
-SQL_SCRIPT = '''
--- ShareUSTC Database Incremental Update Script
+# ============================================
+# 数据库创建部分的 SQL
+# ============================================
+DB_CREATION_SQL = '''
+-- 检查并创建用户
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{db_user}') THEN
+        CREATE USER {db_user} WITH PASSWORD '{db_password}';
+        RAISE NOTICE '用户 {db_user} 创建成功';
+    ELSE
+        RAISE NOTICE '用户 {db_user} 已存在，跳过创建';
+    END IF;
+END $$;
 
+-- 检查并创建数据库
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '{db_name}') THEN
+        CREATE DATABASE {db_name} OWNER {db_user} ENCODING 'UTF8' LC_COLLATE '{locale}' LC_CTYPE '{locale}' TEMPLATE template0;
+        RAISE NOTICE '数据库 {db_name} 创建成功';
+    ELSE
+        RAISE NOTICE '数据库 {db_name} 已存在，跳过创建';
+    END IF;
+END $$;
+'''
+
+# ============================================
+# 权限授予部分的 SQL
+# ============================================
+DB_PERMISSION_SQL = '''
+-- 授予数据库连接权限
+GRANT CONNECT ON DATABASE {db_name} TO {db_user};
+
+-- 在数据库内授予 schema 权限
+GRANT USAGE ON SCHEMA public TO {db_user};
+GRANT CREATE ON SCHEMA public TO {db_user};
+
+-- 启用 pgcrypto 扩展
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+SELECT '权限授予完成' as status;
+'''
+
+# ============================================
+# 表结构创建部分的 SQL
+# ============================================
+TABLE_CREATION_SQL = '''
+-- ============================================
+-- ShareUSTC 数据库增量更新脚本
+-- 支持: 1) 首次创建表  2) 添加新列  3) 创建索引和触发器
+-- 特点: 可重复执行，不会丢失已有数据
+-- ============================================
+
+-- 启用扩展
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+-- ============================================
+-- 创建 sn 序列（从1开始自增）
+-- ============================================
 CREATE SEQUENCE IF NOT EXISTS user_sn_seq START 1;
 
+-- ============================================
+-- 增强：确保序列起始值正确（考虑已有数据）
+-- 版本迁移注意：如果数据库已有用户数据，此逻辑会自动调整序列
+-- ============================================
 DO $$
 BEGIN
     PERFORM setval('user_sn_seq',
@@ -33,7 +97,9 @@ EXCEPTION
     WHEN undefined_column THEN NULL;
 END $$;
 
--- 1. users table
+-- ============================================
+-- 1. 用户表
+-- ============================================
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -79,7 +145,9 @@ BEGIN
     END IF;
 END $$;
 
--- 2. resources table
+-- ============================================
+-- 2. 资源表
+-- ============================================
 CREATE TABLE IF NOT EXISTS resources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -138,7 +206,9 @@ BEGIN
     END IF;
 END $$;
 
--- 3. resource_stats table
+-- ============================================
+-- 3. 资源统计表
+-- ============================================
 CREATE TABLE IF NOT EXISTS resource_stats (
     resource_id UUID PRIMARY KEY REFERENCES resources(id) ON DELETE CASCADE
 );
@@ -189,7 +259,9 @@ BEGIN
     END IF;
 END $$;
 
--- 4. ratings table
+-- ============================================
+-- 4. 评分表
+-- ============================================
 CREATE TABLE IF NOT EXISTS ratings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -241,10 +313,12 @@ BEGIN
     END IF;
 EXCEPTION
     WHEN unique_violation THEN
-        RAISE NOTICE 'Cannot add unique constraint: duplicate data';
+        RAISE NOTICE '无法添加唯一约束：存在重复数据 (resource_id, user_id)';
 END $$;
 
--- 5. likes table
+-- ============================================
+-- 5. 点赞表
+-- ============================================
 CREATE TABLE IF NOT EXISTS likes (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -269,10 +343,12 @@ BEGIN
     END IF;
 EXCEPTION
     WHEN unique_violation THEN
-        RAISE NOTICE 'Cannot add primary key: duplicate data';
+        RAISE NOTICE '无法添加主键约束：存在重复数据';
 END $$;
 
--- 6. comments table
+-- ============================================
+-- 6. 评论表
+-- ============================================
 CREATE TABLE IF NOT EXISTS comments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -305,7 +381,9 @@ BEGIN
     END IF;
 END $$;
 
--- 7. favorites table
+-- ============================================
+-- 7. 收藏夹表
+-- ============================================
 CREATE TABLE IF NOT EXISTS favorites (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -321,11 +399,13 @@ BEGIN
         END IF;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'favorites' AND column_name = 'name') THEN
-        ALTER TABLE favorites ADD COLUMN name VARCHAR(255) NOT NULL DEFAULT 'Unnamed';
+        ALTER TABLE favorites ADD COLUMN name VARCHAR(255) NOT NULL DEFAULT '未命名收藏夹';
     END IF;
 END $$;
 
--- 8. favorite_resources table
+-- ============================================
+-- 8. 收藏夹资源关联表
+-- ============================================
 CREATE TABLE IF NOT EXISTS favorite_resources (
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -350,10 +430,12 @@ BEGIN
     END IF;
 EXCEPTION
     WHEN unique_violation THEN
-        RAISE NOTICE 'Cannot add primary key: duplicate data';
+        RAISE NOTICE '无法添加主键约束：存在重复数据';
 END $$;
 
--- 9. claims table
+-- ============================================
+-- 9. 申领表
+-- ============================================
 CREATE TABLE IF NOT EXISTS claims (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -395,7 +477,9 @@ BEGIN
     END IF;
 END $$;
 
--- 10. notifications table
+-- ============================================
+-- 10. 通知表
+-- ============================================
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -426,7 +510,9 @@ BEGIN
     END IF;
 END $$;
 
--- 10b. notification_reads table
+-- ============================================
+-- 10b. 通知已读记录表
+-- ============================================
 CREATE TABLE IF NOT EXISTS notification_reads (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -460,10 +546,12 @@ BEGIN
     END IF;
 EXCEPTION
     WHEN unique_violation THEN
-        RAISE NOTICE 'Cannot add unique constraint: duplicate data';
+        RAISE NOTICE '无法添加唯一约束：存在重复数据';
 END $$;
 
--- 11. audit_logs table
+-- ============================================
+-- 11. 审计日志表
+-- ============================================
 CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -491,7 +579,9 @@ BEGIN
     END IF;
 END $$;
 
--- 12. download_logs table
+-- ============================================
+-- 12. 下载记录表
+-- ============================================
 CREATE TABLE IF NOT EXISTS download_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -514,7 +604,9 @@ BEGIN
     END IF;
 END $$;
 
--- 13. images table
+-- ============================================
+-- 13. 图片表
+-- ============================================
 CREATE TABLE IF NOT EXISTS images (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -543,7 +635,9 @@ BEGIN
     END IF;
 END $$;
 
--- Assign sn to existing users
+-- ============================================
+-- 为现有用户分配 sn（增量更新支持）
+-- ============================================
 DO $$
 DECLARE
     user_record RECORD;
@@ -560,7 +654,9 @@ BEGIN
     END IF;
 END $$;
 
--- Create indexes
+-- ============================================
+-- 创建索引
+-- ============================================
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_is_verified ON users(is_verified);
 CREATE INDEX IF NOT EXISTS idx_users_sn ON users(sn);
@@ -598,7 +694,9 @@ CREATE INDEX IF NOT EXISTS idx_download_logs_user ON download_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_download_logs_time ON download_logs(downloaded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_images_uploader ON images(uploader_id);
 
--- Create triggers
+-- ============================================
+-- 创建触发器
+-- ============================================
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -632,7 +730,9 @@ CREATE TRIGGER update_comments_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Verify
+-- ============================================
+-- 验证
+-- ============================================
 SELECT 'users' as table_name, COUNT(*) as column_count FROM information_schema.columns WHERE table_name = 'users'
 UNION ALL
 SELECT 'resources', COUNT(*) FROM information_schema.columns WHERE table_name = 'resources'
@@ -662,112 +762,256 @@ UNION ALL
 SELECT 'images', COUNT(*) FROM information_schema.columns WHERE table_name = 'images';
 '''
 
+
 def find_psql():
-    """Find psql executable"""
-    # Check PATH first
+    """查找 psql 可执行文件"""
+    system = platform.system()
+
+    # 首先检查 PATH
     try:
-        result = subprocess.run(['where', 'psql'], capture_output=True, text=True)
+        if system == "Windows":
+            result = subprocess.run(['where', 'psql'], capture_output=True, text=True)
+        else:
+            result = subprocess.run(['which', 'psql'], capture_output=True, text=True)
         if result.returncode == 0:
             return 'psql'
     except:
         pass
-    
-    # Check common PostgreSQL installation paths
-    common_paths = [
-        r"C:\Program Files\PostgreSQL",
-        r"C:\Program Files (x86)\PostgreSQL"
-    ]
-    
-    for base_path in common_paths:
-        if os.path.exists(base_path):
-            for version in os.listdir(base_path):
-                psql_path = os.path.join(base_path, version, 'bin', 'psql.exe')
-                if os.path.exists(psql_path):
-                    return psql_path
-    
+
+    # 检查常见 PostgreSQL 安装路径
+    common_paths = []
+    if system == "Windows":
+        common_paths = [
+            r"C:\Program Files\PostgreSQL",
+            r"C:\Program Files (x86)\PostgreSQL"
+        ]
+    else:
+        common_paths = [
+            "/usr/bin/psql",
+            "/usr/local/bin/psql",
+            "/opt/homebrew/bin/psql",
+            "/Applications/Postgres.app/Contents/Versions/latest/bin/psql"
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+
+    if system == "Windows":
+        for base_path in common_paths:
+            if os.path.exists(base_path):
+                for version in os.listdir(base_path):
+                    psql_path = os.path.join(base_path, version, 'bin', 'psql.exe')
+                    if os.path.exists(psql_path):
+                        return psql_path
+
     return None
 
-def main():
-    print("=== ShareUSTC Database Table Initialization ===")
-    print()
-    
-    # Find psql
-    psql = find_psql()
-    if not psql:
-        print("Error: psql not found. Please install PostgreSQL and ensure it's in PATH.")
-        sys.exit(1)
-    
-    # Test connection
-    print("Testing database connection...")
+
+def execute_sql_with_superuser(psql, sql, password, database="postgres"):
+    """使用超级用户执行 SQL"""
     env = os.environ.copy()
-    env['PGPASSWORD'] = DB_PASSWORD
-    
-    try:
-        result = subprocess.run(
-            [psql, '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', DB_NAME, '-c', 'SELECT 1;'],
-            capture_output=True,
-            text=True,
-            env=env
-        )
-        if result.returncode != 0 or '1' not in result.stdout:
-            raise Exception("Connection failed")
-        print("  Database connection successful")
-    except Exception as e:
-        print("Error: Cannot connect to database.")
-        print("  1. Run db_create_system_win.ps1 first")
-        print("  2. Check username/password")
-        print("  3. Check PostgreSQL service")
-        sys.exit(1)
-    
-    print()
-    print("Starting incremental update...")
-    
-    # Write SQL to temp file
+    env['PGPASSWORD'] = password
+
     with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False, encoding='utf-8') as f:
-        f.write(SQL_SCRIPT)
+        f.write(sql)
         temp_file = f.name
-    
+
     try:
-        # Execute SQL
         result = subprocess.run(
-            [psql, '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', DB_NAME, '-f', temp_file],
+            [psql, '-h', DB_HOST, '-p', DB_PORT, '-U', POSTGRES_USER, '-d', database, '-f', temp_file, '-q'],
             capture_output=True,
             text=True,
             env=env
         )
-        print(result.stdout)
-        if result.stderr:
-            print(result.stderr)
-        
-        if result.returncode != 0:
-            print("Error: SQL execution failed")
-            sys.exit(1)
+        return result
     finally:
         os.unlink(temp_file)
-    
+
+
+def execute_sql_with_app_user(psql, database, sql):
+    """使用应用用户执行 SQL"""
+    env = os.environ.copy()
+    env['PGPASSWORD'] = DB_PASSWORD
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False, encoding='utf-8') as f:
+        f.write(sql)
+        temp_file = f.name
+
+    try:
+        result = subprocess.run(
+            [psql, '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER, '-d', database, '-f', temp_file, '-q'],
+            capture_output=True,
+            text=True,
+            env=env
+        )
+        return result
+    finally:
+        os.unlink(temp_file)
+
+
+def create_database(psql, postgres_password):
+    """步骤1: 创建数据库和用户"""
+    print("=== 步骤 1/3: 创建数据库和用户 ===")
     print()
-    print("=== Table structure update completed ===")
+
+    # 检测操作系统以设置正确的 locale
+    system = platform.system()
+    locale = "C" if system == "Windows" else "C.UTF-8"
+
+    sql = DB_CREATION_SQL.format(
+        db_name=DB_NAME,
+        db_user=DB_USER,
+        db_password=DB_PASSWORD,
+        locale=locale
+    )
+
+    result = execute_sql_with_superuser(psql, sql, postgres_password)
+
+    if result.returncode == 0:
+        print(f"  数据库 '{DB_NAME}' 和用户 '{DB_USER}' 检查/创建完成")
+        return True
+    else:
+        print(f"  错误: 创建数据库失败")
+        print(f"  {result.stderr}")
+        return False
+
+
+def grant_permissions(psql, postgres_password):
+    """步骤2: 授予权限"""
+    print("=== 步骤 2/3: 授予权限 ===")
     print()
-    print("Created/Updated tables:")
-    print("  - users")
-    print("  - resources")
-    print("  - resource_stats")
-    print("  - ratings")
-    print("  - likes")
-    print("  - comments")
-    print("  - favorites")
-    print("  - favorite_resources")
-    print("  - claims")
-    print("  - notifications")
-    print("  - notification_reads")
-    print("  - audit_logs")
-    print("  - download_logs")
-    print("  - images")
+
+    sql = DB_PERMISSION_SQL.format(
+        db_name=DB_NAME,
+        db_user=DB_USER
+    )
+
+    result = execute_sql_with_superuser(psql, sql, postgres_password, database=DB_NAME)
+
+    if result.returncode == 0:
+        print(f"  权限授予完成")
+        return True
+    else:
+        print(f"  错误: 授予权限失败")
+        print(f"  {result.stderr}")
+        return False
+
+
+def create_tables(psql):
+    """步骤3: 创建表结构"""
+    print("=== 步骤 3/3: 创建表结构 ===")
     print()
-    print("Indexes: 30+")
-    print("Triggers: 4 (auto update updated_at)")
+
+    print("  开始执行增量更新...")
+    result = execute_sql_with_app_user(psql, DB_NAME, TABLE_CREATION_SQL)
+
+    if result.returncode == 0:
+        print(result.stdout)
+        return True
+    else:
+        print(f"  错误: SQL 执行失败")
+        print(f"  {result.stderr}")
+        return False
+
+
+def test_connection(psql, user, password, database):
+    """测试数据库连接"""
+    env = os.environ.copy()
+    env['PGPASSWORD'] = password
+
+    try:
+        result = subprocess.run(
+            [psql, '-h', DB_HOST, '-p', DB_PORT, '-U', user, '-d', database, '-c', 'SELECT 1;', '-q'],
+            capture_output=True,
+            text=True,
+            env=env
+        )
+        return result.returncode == 0 and '1' in result.stdout
+    except:
+        return False
+
+
+def main():
+    print("=" * 50)
+    print("ShareUSTC 数据库初始化脚本")
+    print("=" * 50)
     print()
-    print("Note: This script supports incremental updates.")
+    print("功能: 创建数据库、用户和表结构")
+    print("注意: 需要 PostgreSQL 超级用户权限")
+    print()
+
+    # 查找 psql
+    psql = find_psql()
+    if not psql:
+        print("错误: 未找到 psql 命令。请安装 PostgreSQL 并确保它在 PATH 中。")
+        sys.exit(1)
+    print(f"使用 psql: {psql}")
+    print()
+
+    # 请求 postgres 用户密码
+    system = platform.system()
+    if system == "Windows":
+        import getpass as gp
+        postgres_password = gp.getpass(f"请输入 PostgreSQL '{POSTGRES_USER}' 用户的密码 (默认通常为 'postgres' 或空): ")
+    else:
+        import getpass as gp
+        postgres_password = gp.getpass(f"请输入 PostgreSQL '{POSTGRES_USER}' 用户的密码 (默认通常为 'postgres' 或空): ")
+    print()
+
+    # 测试 postgres 连接
+    print("测试 postgres 用户连接...")
+    if not test_connection(psql, POSTGRES_USER, postgres_password, "postgres"):
+        print("错误: 无法连接到 PostgreSQL。请检查密码和服务状态。")
+        sys.exit(1)
+    print("  连接成功")
+    print()
+
+    # 步骤1: 创建数据库和用户
+    if not create_database(psql, postgres_password):
+        sys.exit(1)
+    print()
+
+    # 步骤2: 授予权限
+    if not grant_permissions(psql, postgres_password):
+        sys.exit(1)
+    print()
+
+    # 步骤3: 创建表结构
+    if not create_tables(psql):
+        sys.exit(1)
+    print()
+
+    print("=" * 50)
+    print("数据库初始化完成！")
+    print("=" * 50)
+    print()
+    print("数据库信息:")
+    print(f"  数据库名: {DB_NAME}")
+    print(f"  用户名:   {DB_USER}")
+    print(f"  密码:     {DB_PASSWORD}")
+    print()
+    print("已创建/更新的表:")
+    print("  - users (用户表)")
+    print("  - resources (资源表)")
+    print("  - resource_stats (资源统计表)")
+    print("  - ratings (评分表)")
+    print("  - likes (点赞表)")
+    print("  - comments (评论表)")
+    print("  - favorites (收藏夹表)")
+    print("  - favorite_resources (收藏夹资源关联表)")
+    print("  - claims (申领表)")
+    print("  - notifications (通知表)")
+    print("  - notification_reads (通知已读记录表)")
+    print("  - audit_logs (审计日志表)")
+    print("  - download_logs (下载记录表)")
+    print("  - images (图片表)")
+    print()
+    print("索引: 30+")
+    print("触发器: 4 (自动更新 updated_at)")
+    print()
+    print("说明: 此脚本支持增量更新，可重复执行。")
+    print()
+
 
 if __name__ == '__main__':
     main()
