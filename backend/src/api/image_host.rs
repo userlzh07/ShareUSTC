@@ -28,9 +28,7 @@ pub async fn upload_image(
         };
 
         let content_disposition = field.content_disposition();
-        let field_name = content_disposition
-            .get_name()
-            .unwrap_or("unknown");
+        let field_name = content_disposition.get_name().unwrap_or("unknown");
 
         if field_name == "image" {
             // 获取文件名
@@ -70,6 +68,7 @@ pub async fn upload_image(
     match ImageService::upload_image(
         &state.pool,
         &user,
+        &state.storage,
         &filename,
         data,
         mime_type.as_deref(),
@@ -110,10 +109,7 @@ pub async fn get_my_images(
 
 /// 获取单张图片信息
 #[get("/images/{image_id}")]
-pub async fn get_image_info(
-    state: web::Data<AppState>,
-    path: web::Path<Uuid>,
-) -> impl Responder {
+pub async fn get_image_info(state: web::Data<AppState>, path: web::Path<Uuid>) -> impl Responder {
     let image_id = path.into_inner();
 
     match ImageService::get_image_by_id(&state.pool, image_id).await {
@@ -137,7 +133,7 @@ pub async fn delete_image(
 ) -> impl Responder {
     let image_id = path.into_inner();
 
-    match ImageService::delete_image(&state.pool, &user, image_id).await {
+    match ImageService::delete_image(&state.pool, &user, &state.storage, image_id).await {
         Ok(_) => no_content(),
         Err(e) => {
             log::warn!("删除图片失败: {}", e);

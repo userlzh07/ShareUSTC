@@ -1,8 +1,6 @@
-use crate::models::{
-    resource::*,
-    CurrentUser,
-};
+use crate::models::{resource::*, CurrentUser};
 use sqlx::{PgPool, Row};
+use std::sync::Arc;
 use uuid::Uuid;
 
 use super::{AiService, FileService};
@@ -38,10 +36,22 @@ impl From<super::file_service::FileError> for ResourceError {
             super::file_service::FileError::ValidationError(msg) => {
                 ResourceError::ValidationError(msg)
             }
-            super::file_service::FileError::FileSystemError(msg) => {
-                ResourceError::FileError(msg)
-            }
+            super::file_service::FileError::FileSystemError(msg) => ResourceError::FileError(msg),
             super::file_service::FileError::NotFound(msg) => ResourceError::NotFound(msg),
+        }
+    }
+}
+
+impl From<super::storage_service::StorageError> for ResourceError {
+    fn from(err: super::storage_service::StorageError) -> Self {
+        match err {
+            super::storage_service::StorageError::Validation(msg) => {
+                ResourceError::ValidationError(msg)
+            }
+            super::storage_service::StorageError::Config(msg) => ResourceError::FileError(msg),
+            super::storage_service::StorageError::NotFound(msg) => ResourceError::NotFound(msg),
+            super::storage_service::StorageError::Io(msg) => ResourceError::FileError(msg),
+            super::storage_service::StorageError::Backend(msg) => ResourceError::FileError(msg),
         }
     }
 }
@@ -55,10 +65,238 @@ impl From<sqlx::Error> for ResourceError {
 pub struct ResourceService;
 
 impl ResourceService {
+    fn infer_resource_type(file_name: &str, mime_type: Option<&str>) -> Option<ResourceType> {
+        let extension = std::path::Path::new(file_name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_lowercase());
+
+        if let Some(ext) = extension {
+            let resource_type = ResourceType::from_extension(&ext);
+            if resource_type != ResourceType::Other {
+                return Some(resource_type);
+            }
+        }
+
+        mime_type.map(|mime| match mime {
+            "application/pdf" => ResourceType::Pdf,
+            "text/plain" => ResourceType::Txt,
+            "text/markdown" => ResourceType::WebMarkdown,
+            "image/jpeg" => ResourceType::Jpeg,
+            "image/png" => ResourceType::Png,
+            "application/zip" => ResourceType::Zip,
+            "application/msword" => ResourceType::Doc,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+                ResourceType::Docx
+            }
+            "application/vnd.ms-powerpoint" => ResourceType::Ppt,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
+                ResourceType::Pptx
+            }
+            _ => ResourceType::Other,
+        })
+    }
+
+    pub async fn create_resource_from_oss_callback(
+        pool: &PgPool,
+        user: &CurrentUser,
+        storage: &Arc<dyn super::StorageBackend>,
+        request: UploadResourceRequest,
+        oss_key: &str,
+        metadata: super::StorageFileMetadata,
+    ) -> Result<UploadResourceResponse, ResourceError> {
+        request.validate().map_err(ResourceError::ValidationError)?;
+
+        let file_size = metadata
+            .content_length
+            .ok_or_else(|| ResourceError::ValidationError("无法获取文件大小".to_string()))?
+            as i64;
+        if file_size <= 0 {
+            return Err(ResourceError::ValidationError("文件不能为空".to_string()));
+        }
+        if file_size as usize > FileService::MAX_FILE_SIZE {
+            return Err(ResourceError::ValidationError(format!(
+                "文件大小超过限制。最大允许 100MB，当前 {:.2}MB",
+                file_size as f64 / 1024.0 / 1024.0
+            )));
+        }
+
+        let object_name = oss_key.rsplit('/').next().unwrap_or(oss_key);
+        let resource_type =
+            Self::infer_resource_type(object_name, metadata.content_type.as_deref()).ok_or_else(
+                || {
+                    ResourceError::ValidationError(format!(
+                        "不支持的文件类型。支持的类型: {}",
+                        ResourceType::supported_extensions().join(", ")
+                    ))
+                },
+            )?;
+        if resource_type == ResourceType::Other {
+            return Err(ResourceError::ValidationError(format!(
+                "不支持的文件类型。支持的类型: {}",
+                ResourceType::supported_extensions().join(", ")
+            )));
+        }
+
+        let ai_result =
+            AiService::audit_resource(&request.title, request.description.as_deref(), None)
+                .await
+                .map_err(|e| ResourceError::AiError(e.to_string()))?;
+        let audit_status = if ai_result.passed {
+            AuditStatus::Approved
+        } else {
+            AuditStatus::Pending
+        };
+
+        let resource_id = Uuid::new_v4();
+        let tags_json = request
+            .tags
+            .as_ref()
+            .map(|tags| serde_json::to_value(tags).unwrap_or(serde_json::Value::Array(vec![])));
+        let storage_type = storage.backend_type().as_str().to_string();
+
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| ResourceError::DatabaseError(format!("开启事务失败: {}", e)))?;
+
+        let resource: Resource = match sqlx::query_as::<_, Resource>(
+            r#"
+            INSERT INTO resources (
+                id, title, author_id, uploader_id, course_name,
+                resource_type, category, tags, file_path, source_file_path,
+                file_hash, file_size, content_accuracy, audit_status, ai_reject_reason, storage_type
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            RETURNING *
+            "#,
+        )
+        .bind(resource_id)
+        .bind(&request.title)
+        .bind(None::<Uuid>)
+        .bind(user.id)
+        .bind(request.course_name.clone())
+        .bind(resource_type.to_string())
+        .bind(request.category.to_string())
+        .bind(tags_json)
+        .bind(oss_key)
+        .bind(None::<String>)
+        .bind(None::<String>)
+        .bind(file_size)
+        .bind(ai_result.accuracy_score)
+        .bind(audit_status.to_string())
+        .bind(if ai_result.passed {
+            None
+        } else {
+            ai_result.reason.as_deref()
+        })
+        .bind(&storage_type)
+        .fetch_one(&mut *tx)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                if let Err(cleanup_err) = storage.delete_file(oss_key).await {
+                    log::warn!(
+                        "[Resource] OSS 回调入库失败后清理文件失败 | key={}, error={}",
+                        oss_key,
+                        cleanup_err
+                    );
+                }
+                return Err(ResourceError::DatabaseError(format!("插入资源失败: {}", e)));
+            }
+        };
+
+        if let Err(e) = sqlx::query(
+            "INSERT INTO resource_stats (resource_id, views, downloads, likes, rating_count) VALUES ($1, 0, 0, 0, 0)",
+        )
+        .bind(resource_id)
+        .execute(&mut *tx)
+        .await
+        {
+            if let Err(rollback_err) = tx.rollback().await {
+                log::warn!("[Resource] 资源统计初始化失败后回滚失败: {}", rollback_err);
+            }
+            if let Err(cleanup_err) = storage.delete_file(oss_key).await {
+                log::warn!(
+                    "[Resource] 资源统计初始化失败后清理文件失败 | key={}, error={}",
+                    oss_key,
+                    cleanup_err
+                );
+            }
+            return Err(ResourceError::DatabaseError(format!("创建统计记录失败: {}", e)));
+        }
+
+        if let Some(teacher_sns) = &request.teacher_sns {
+            for teacher_sn in teacher_sns {
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO resource_teachers (resource_id, teacher_sn) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                )
+                .bind(resource_id)
+                .bind(teacher_sn)
+                .execute(&mut *tx)
+                .await
+                {
+                    log::warn!(
+                        "[Resource] 回调插入教师关联失败 | resource_id={}, teacher_sn={}, error={}",
+                        resource_id,
+                        teacher_sn,
+                        e
+                    );
+                }
+            }
+        }
+
+        if let Some(course_sns) = &request.course_sns {
+            for course_sn in course_sns {
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO resource_courses (resource_id, course_sn) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                )
+                .bind(resource_id)
+                .bind(course_sn)
+                .execute(&mut *tx)
+                .await
+                {
+                    log::warn!(
+                        "[Resource] 回调插入课程关联失败 | resource_id={}, course_sn={}, error={}",
+                        resource_id,
+                        course_sn,
+                        e
+                    );
+                }
+            }
+        }
+
+        if let Err(e) = tx.commit().await {
+            if let Err(cleanup_err) = storage.delete_file(oss_key).await {
+                log::warn!(
+                    "[Resource] 回调提交事务失败后清理文件失败 | key={}, error={}",
+                    oss_key,
+                    cleanup_err
+                );
+            }
+            return Err(ResourceError::DatabaseError(format!("提交事务失败: {}", e)));
+        }
+
+        Ok(UploadResourceResponse {
+            id: resource.id,
+            title: resource.title,
+            resource_type: resource.resource_type,
+            audit_status: resource.audit_status,
+            ai_message: if ai_result.passed {
+                Some("AI 审核通过".to_string())
+            } else {
+                Some("AI 审核未通过，等待人工审核".to_string())
+            },
+            created_at: resource.created_at,
+        })
+    }
+
     /// 上传资源
     pub async fn upload_resource(
         pool: &PgPool,
         user: &CurrentUser,
+        storage: &Arc<dyn super::StorageBackend>,
         request: UploadResourceRequest,
         file_name: &str,
         file_data: Vec<u8>,
@@ -79,9 +317,17 @@ impl ResourceService {
         .await
         .map_err(|e| ResourceError::AiError(e.to_string()))?;
 
-        // 保存文件
-        let (file_path, file_hash, file_size) =
-            FileService::save_resource_file(file_data, &resource_type).await?;
+        // 生成资源 ID
+        let resource_id = Uuid::new_v4();
+        let resource_type_str = resource_type.to_string();
+        let extension = FileService::get_extension_by_type(&resource_type_str);
+        let file_key = format!("resources/{}.{}", resource_id, extension);
+        let file_hash = FileService::calculate_hash(&file_data);
+        let file_size = file_data.len() as i64;
+        let storage_type = storage.backend_type().as_str().to_string();
+
+        // 保存文件（统一走存储抽象）
+        let file_path = storage.save_file(&file_key, file_data, mime_type).await?;
 
         // 确定审核状态
         let audit_status = if ai_result.passed {
@@ -90,38 +336,47 @@ impl ResourceService {
             AuditStatus::Pending
         };
 
-        // 生成资源 ID
-        let resource_id = Uuid::new_v4();
-
         // 转换标签为 JSON
-        let tags_json = request.tags.map(|tags| {
-            serde_json::to_value(tags).unwrap_or(serde_json::Value::Array(vec![]))
-        });
+        let tags_json = request
+            .tags
+            .map(|tags| serde_json::to_value(tags).unwrap_or(serde_json::Value::Array(vec![])));
 
         // 开启事务
         let mut tx = match pool.begin().await {
             Ok(t) => t,
             Err(e) => {
-                log::error!("[Resource] 开启事务失败 | resource_id={}, error={}", resource_id, e);
+                log::error!(
+                    "[Resource] 开启事务失败 | resource_id={}, error={}",
+                    resource_id,
+                    e
+                );
                 // 开启事务失败时清理已保存的文件
-                if let Err(cleanup_err) = FileService::delete_resource_file(&file_path).await {
-                    log::error!("[Resource] 开启事务失败后清理文件出错 | path={}, error={}", file_path, cleanup_err);
+                if let Err(cleanup_err) = storage.delete_file(&file_path).await {
+                    log::error!(
+                        "[Resource] 开启事务失败后清理文件出错 | path={}, error={}",
+                        file_path,
+                        cleanup_err
+                    );
                 }
                 return Err(ResourceError::DatabaseError(format!("开启事务失败: {}", e)));
             }
         };
 
         // 插入资源记录
-        log::debug!("[Resource] 准备插入资源记录 | title={}, resource_type={}", request.title, resource_type.to_string());
+        log::debug!(
+            "[Resource] 准备插入资源记录 | title={}, resource_type={}",
+            request.title,
+            resource_type.to_string()
+        );
 
         let resource: Resource = match sqlx::query_as::<_, Resource>(
             r#"
             INSERT INTO resources (
                 id, title, author_id, uploader_id, course_name,
                 resource_type, category, tags, file_path, source_file_path,
-                file_hash, file_size, content_accuracy, audit_status, ai_reject_reason
+                file_hash, file_size, content_accuracy, audit_status, ai_reject_reason, storage_type
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING *
             "#,
         )
@@ -139,15 +394,29 @@ impl ResourceService {
         .bind(file_size)
         .bind(ai_result.accuracy_score)
         .bind(audit_status.to_string())
-        .bind(if ai_result.passed { None } else { ai_result.reason.as_deref() })
+        .bind(if ai_result.passed {
+            None
+        } else {
+            ai_result.reason.as_deref()
+        })
+        .bind(&storage_type)
         .fetch_one(&mut *tx)
-        .await {
+        .await
+        {
             Ok(r) => r,
             Err(e) => {
-                log::error!("[Resource] 数据库插入失败 | resource_id={}, error={}", resource_id, e);
+                log::error!(
+                    "[Resource] 数据库插入失败 | resource_id={}, error={}",
+                    resource_id,
+                    e
+                );
                 // 数据库插入失败时清理已保存的文件
-                if let Err(cleanup_err) = FileService::delete_resource_file(&file_path).await {
-                    log::error!("[Resource] 数据库插入失败后清理文件出错 | path={}, error={}", file_path, cleanup_err);
+                if let Err(cleanup_err) = storage.delete_file(&file_path).await {
+                    log::error!(
+                        "[Resource] 数据库插入失败后清理文件出错 | path={}, error={}",
+                        file_path,
+                        cleanup_err
+                    );
                 }
                 return Err(ResourceError::DatabaseError(format!("插入资源失败: {}", e)));
             }
@@ -167,7 +436,7 @@ impl ResourceService {
             if let Err(rollback_err) = tx.rollback().await {
                 log::error!("[Resource] 回滚事务失败 | error={}", rollback_err);
             }
-            if let Err(cleanup_err) = FileService::delete_resource_file(&file_path).await {
+            if let Err(cleanup_err) = storage.delete_file(&file_path).await {
                 log::error!("[Resource] 创建统计记录失败后清理文件出错 | path={}, error={}", file_path, cleanup_err);
             }
             return Err(ResourceError::DatabaseError(format!("创建统计记录失败: {}", e)));
@@ -187,7 +456,11 @@ impl ResourceService {
                     // 非关键错误，继续处理
                 }
             }
-            log::debug!("[Resource] 教师关联插入完成 | resource_id={}, count={}", resource_id, teacher_sns.len());
+            log::debug!(
+                "[Resource] 教师关联插入完成 | resource_id={}, count={}",
+                resource_id,
+                teacher_sns.len()
+            );
         }
 
         // 插入课程关联记录
@@ -204,16 +477,28 @@ impl ResourceService {
                     // 非关键错误，继续处理
                 }
             }
-            log::debug!("[Resource] 课程关联插入完成 | resource_id={}, count={}", resource_id, course_sns.len());
+            log::debug!(
+                "[Resource] 课程关联插入完成 | resource_id={}, count={}",
+                resource_id,
+                course_sns.len()
+            );
         }
 
         // 提交事务
         if let Err(e) = tx.commit().await {
-            log::error!("[Resource] 提交事务失败 | resource_id={}, error={}", resource_id, e);
+            log::error!(
+                "[Resource] 提交事务失败 | resource_id={}, error={}",
+                resource_id,
+                e
+            );
 
             // 事务提交失败时尝试清理已保存的文件，避免产生孤立文件
-            if let Err(cleanup_err) = FileService::delete_resource_file(&file_path).await {
-                log::error!("[Resource] 事务提交失败后清理文件出错 | path={}, error={}", file_path, cleanup_err);
+            if let Err(cleanup_err) = storage.delete_file(&file_path).await {
+                log::error!(
+                    "[Resource] 事务提交失败后清理文件出错 | path={}, error={}",
+                    file_path,
+                    cleanup_err
+                );
             }
 
             return Err(ResourceError::DatabaseError(format!("提交事务失败: {}", e)));
@@ -238,18 +523,17 @@ impl ResourceService {
         resource_id: Uuid,
     ) -> Result<ResourceDetailResponse, ResourceError> {
         // 获取资源信息
-        let resource: Resource = sqlx::query_as::<_, Resource>(
-            "SELECT * FROM resources WHERE id = $1"
-        )
-        .bind(resource_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
-        .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
+        let resource: Resource =
+            sqlx::query_as::<_, Resource>("SELECT * FROM resources WHERE id = $1")
+                .bind(resource_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
+                .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
 
         // 获取统计信息
         let stats: ResourceStats = sqlx::query_as::<_, ResourceStats>(
-            "SELECT * FROM resource_stats WHERE resource_id = $1"
+            "SELECT * FROM resource_stats WHERE resource_id = $1",
         )
         .bind(resource_id)
         .fetch_one(pool)
@@ -257,18 +541,18 @@ impl ResourceService {
         .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
         // 获取上传者名称
-        let uploader_name: Option<String> = sqlx::query_scalar(
-            "SELECT username FROM users WHERE id = $1"
-        )
-        .bind(resource.uploader_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+        let uploader_name: Option<String> =
+            sqlx::query_scalar("SELECT username FROM users WHERE id = $1")
+                .bind(resource.uploader_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
         // 转换标签
-        let tags: Option<Vec<String>> = resource.tags.as_ref().and_then(|t| {
-            serde_json::from_value::<Vec<String>>(t.clone()).ok()
-        });
+        let tags: Option<Vec<String>> = resource
+            .tags
+            .as_ref()
+            .and_then(|t| serde_json::from_value::<Vec<String>>(t.clone()).ok());
 
         // 获取关联的教师列表
         let teachers: Vec<super::TeacherInfo> = sqlx::query_as::<_, super::TeacherInfo>(
@@ -278,13 +562,17 @@ impl ResourceService {
             INNER JOIN resource_teachers rt ON t.sn = rt.teacher_sn
             WHERE rt.resource_id = $1 AND t.is_active = true
             ORDER BY t.sn ASC
-            "#
+            "#,
         )
         .bind(resource_id)
         .fetch_all(pool)
         .await
         .map_err(|e| {
-            log::warn!("[Resource] 获取关联教师失败 | resource_id={}, error={}", resource_id, e);
+            log::warn!(
+                "[Resource] 获取关联教师失败 | resource_id={}, error={}",
+                resource_id,
+                e
+            );
             e
         })
         .unwrap_or_default();
@@ -297,13 +585,17 @@ impl ResourceService {
             INNER JOIN resource_courses rc ON c.sn = rc.course_sn
             WHERE rc.resource_id = $1 AND c.is_active = true
             ORDER BY c.sn ASC
-            "#
+            "#,
         )
         .bind(resource_id)
         .fetch_all(pool)
         .await
         .map_err(|e| {
-            log::warn!("[Resource] 获取关联课程失败 | resource_id={}, error={}", resource_id, e);
+            log::warn!(
+                "[Resource] 获取关联课程失败 | resource_id={}, error={}",
+                resource_id,
+                e
+            );
             e
         })
         .unwrap_or_default();
@@ -365,7 +657,7 @@ impl ResourceService {
 
         // 使用 QueryBuilder 构建 COUNT 查询
         let mut count_builder = sqlx::QueryBuilder::new(
-            "SELECT COUNT(*) FROM resources r WHERE r.audit_status = 'approved'"
+            "SELECT COUNT(*) FROM resources r WHERE r.audit_status = 'approved'",
         );
 
         // 处理资源类型筛选（支持合并类型）
@@ -397,7 +689,7 @@ impl ResourceService {
             LEFT JOIN resource_stats rs ON r.id = rs.resource_id
             LEFT JOIN users u ON r.uploader_id = u.id
             WHERE r.audit_status = 'approved'
-            "#
+            "#,
         );
 
         // 处理资源类型筛选
@@ -457,13 +749,14 @@ impl ResourceService {
     }
 
     /// 辅助方法：将查询结果行映射为 ResourceListItem
-    fn map_rows_to_resources(rows: Vec<sqlx::postgres::PgRow>) -> Result<Vec<ResourceListItem>, ResourceError> {
+    fn map_rows_to_resources(
+        rows: Vec<sqlx::postgres::PgRow>,
+    ) -> Result<Vec<ResourceListItem>, ResourceError> {
         let mut resources = Vec::new();
         for row in rows {
             let tags_json: Option<serde_json::Value> = row.try_get("tags").ok();
-            let tags: Option<Vec<String>> = tags_json.and_then(|t| {
-                serde_json::from_value::<Vec<String>>(t).ok()
-            });
+            let tags: Option<Vec<String>> =
+                tags_json.and_then(|t| serde_json::from_value::<Vec<String>>(t).ok());
 
             // 计算各维度的平均分
             let avg_difficulty = Self::calc_avg(
@@ -494,17 +787,33 @@ impl ResourceService {
                 row.try_get::<i32, _>("answer_quality_count").unwrap_or(0),
                 row.try_get::<i32, _>("format_quality_count").unwrap_or(0),
                 row.try_get::<i32, _>("detail_level_count").unwrap_or(0),
-            ].iter().max().copied().unwrap_or(0);
+            ]
+            .iter()
+            .max()
+            .copied()
+            .unwrap_or(0);
 
             resources.push(ResourceListItem {
-                id: row.try_get("id").map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
-                title: row.try_get("title").map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
+                id: row
+                    .try_get("id")
+                    .map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
+                title: row
+                    .try_get("title")
+                    .map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
                 course_name: row.try_get("course_name").ok(),
-                resource_type: row.try_get("resource_type").map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
-                category: row.try_get("category").map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
+                resource_type: row
+                    .try_get("resource_type")
+                    .map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
+                category: row
+                    .try_get("category")
+                    .map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
                 tags,
-                audit_status: row.try_get("audit_status").map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
-                created_at: row.try_get("created_at").map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
+                audit_status: row
+                    .try_get("audit_status")
+                    .map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
+                created_at: row
+                    .try_get("created_at")
+                    .map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
                 stats: ResourceStatsResponse {
                     views: row.try_get::<i32, _>("views").unwrap_or(0),
                     downloads: row.try_get::<i32, _>("downloads").unwrap_or(0),
@@ -580,7 +889,7 @@ impl ResourceService {
             LEFT JOIN resource_stats rs ON r.id = rs.resource_id
             LEFT JOIN users u ON r.uploader_id = u.id
             WHERE r.audit_status = 'approved' AND (r.title ILIKE
-            "#
+            "#,
         );
         search_builder.push_bind(&search_pattern);
         search_builder.push(" OR r.course_name ILIKE ");
@@ -623,35 +932,45 @@ impl ResourceService {
     pub async fn delete_resource(
         pool: &PgPool,
         user: &CurrentUser,
+        storage: &Arc<dyn super::StorageBackend>,
         resource_id: Uuid,
     ) -> Result<String, ResourceError> {
         // 获取资源信息
-        let resource: Resource = sqlx::query_as::<_, Resource>(
-            "SELECT * FROM resources WHERE id = $1"
-        )
-        .bind(resource_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
-        .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
+        let resource: Resource =
+            sqlx::query_as::<_, Resource>("SELECT * FROM resources WHERE id = $1")
+                .bind(resource_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
+                .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
 
         // 检查权限（上传者或管理员）
         if resource.uploader_id != user.id && user.role != crate::models::UserRole::Admin {
             return Err(ResourceError::Unauthorized(
-                "没有权限删除此资源".to_string()
+                "没有权限删除此资源".to_string(),
             ));
         }
 
         // 删除文件
-        if let Err(e) = FileService::delete_resource_file(&resource.file_path).await {
-            log::warn!("[Resource] 删除资源文件失败 | resource_id={}, path={}, error={}", resource_id, resource.file_path, e);
+        if let Err(e) = storage.delete_file(&resource.file_path).await {
+            log::warn!(
+                "[Resource] 删除资源文件失败 | resource_id={}, path={}, error={}",
+                resource_id,
+                resource.file_path,
+                e
+            );
             // 继续执行，即使文件删除失败也要删除数据库记录
         }
 
         // 删除源文件（如果存在）
         if let Some(source_path) = &resource.source_file_path {
-            if let Err(e) = FileService::delete_resource_file(source_path).await {
-                log::warn!("[Resource] 删除源文件失败 | resource_id={}, path={}, error={}", resource_id, source_path, e);
+            if let Err(e) = storage.delete_file(source_path).await {
+                log::warn!(
+                    "[Resource] 删除源文件失败 | resource_id={}, path={}, error={}",
+                    resource_id,
+                    source_path,
+                    e
+                );
             }
         }
 
@@ -678,13 +997,12 @@ impl ResourceService {
         let offset = (page - 1) * per_page;
 
         // 获取总数
-        let total: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM resources WHERE uploader_id = $1"
-        )
-        .bind(user_id)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM resources WHERE uploader_id = $1")
+                .bind(user_id)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
         // 获取资源列表
         let rows = sqlx::query(
@@ -702,7 +1020,7 @@ impl ResourceService {
             WHERE r.uploader_id = $1
             ORDER BY r.created_at DESC
             LIMIT $2 OFFSET $3
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(per_page as i64)
@@ -716,9 +1034,8 @@ impl ResourceService {
             log::debug!("处理第 {} 行数据", idx);
 
             let tags_json: Option<serde_json::Value> = row.try_get("tags").ok();
-            let tags: Option<Vec<String>> = tags_json.and_then(|t| {
-                serde_json::from_value::<Vec<String>>(t).ok()
-            });
+            let tags: Option<Vec<String>> =
+                tags_json.and_then(|t| serde_json::from_value::<Vec<String>>(t).ok());
 
             // 安全地获取每个字段
             let id: Uuid = row.try_get("id").map_err(|e| {
@@ -785,9 +1102,19 @@ impl ResourceService {
                 row.try_get::<i32, _>("answer_quality_count").unwrap_or(0),
                 row.try_get::<i32, _>("format_quality_count").unwrap_or(0),
                 row.try_get::<i32, _>("detail_level_count").unwrap_or(0),
-            ].iter().max().copied().unwrap_or(0);
+            ]
+            .iter()
+            .max()
+            .copied()
+            .unwrap_or(0);
 
-            log::debug!("资源 {} stats: views={}, downloads={}, likes={}", id, views, downloads, likes);
+            log::debug!(
+                "资源 {} stats: views={}, downloads={}, likes={}",
+                id,
+                views,
+                downloads,
+                likes
+            );
 
             resources.push(ResourceListItem {
                 id,
@@ -828,30 +1155,23 @@ impl ResourceService {
         pool: &PgPool,
         resource_id: Uuid,
     ) -> Result<(), ResourceError> {
-        sqlx::query(
-            "UPDATE resource_stats SET downloads = downloads + 1 WHERE resource_id = $1"
-        )
-        .bind(resource_id)
-        .execute(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+        sqlx::query("UPDATE resource_stats SET downloads = downloads + 1 WHERE resource_id = $1")
+            .bind(resource_id)
+            .execute(pool)
+            .await
+            .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
         Ok(())
     }
 
     /// 增加访问次数（预留接口）
     #[allow(dead_code)]
-    pub async fn increment_views(
-        pool: &PgPool,
-        resource_id: Uuid,
-    ) -> Result<(), ResourceError> {
-        sqlx::query(
-            "UPDATE resource_stats SET views = views + 1 WHERE resource_id = $1"
-        )
-        .bind(resource_id)
-        .execute(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+    pub async fn increment_views(pool: &PgPool, resource_id: Uuid) -> Result<(), ResourceError> {
+        sqlx::query("UPDATE resource_stats SET views = views + 1 WHERE resource_id = $1")
+            .bind(resource_id)
+            .execute(pool)
+            .await
+            .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
         Ok(())
     }
@@ -879,14 +1199,13 @@ impl ResourceService {
         pool: &PgPool,
         resource_id: Uuid,
     ) -> Result<(String, String), ResourceError> {
-        let row: (String, String) = sqlx::query_as(
-            "SELECT file_path, resource_type FROM resources WHERE id = $1"
-        )
-        .bind(resource_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
-        .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
+        let row: (String, String) =
+            sqlx::query_as("SELECT file_path, resource_type FROM resources WHERE id = $1")
+                .bind(resource_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
+                .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
 
         Ok(row)
     }
@@ -920,49 +1239,54 @@ impl ResourceService {
     pub async fn update_resource_content(
         pool: &PgPool,
         user: &CurrentUser,
+        storage: &Arc<dyn super::StorageBackend>,
         resource_id: Uuid,
         content: String,
     ) -> Result<crate::models::UpdateResourceContentResponse, ResourceError> {
         // 验证内容长度
         if content.len() > 10 * 1024 * 1024 {
-            return Err(ResourceError::ValidationError("内容大小超过10MB限制".to_string()));
+            return Err(ResourceError::ValidationError(
+                "内容大小超过10MB限制".to_string(),
+            ));
         }
 
         // 获取资源信息
-        let resource: crate::models::Resource = sqlx::query_as::<_, crate::models::Resource>(
-            "SELECT * FROM resources WHERE id = $1"
-        )
-        .bind(resource_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
-        .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
+        let resource: crate::models::Resource =
+            sqlx::query_as::<_, crate::models::Resource>("SELECT * FROM resources WHERE id = $1")
+                .bind(resource_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
+                .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
 
         // 检查权限（上传者或管理员）
         if resource.uploader_id != user.id && user.role != crate::models::UserRole::Admin {
             return Err(ResourceError::Unauthorized(
-                "没有权限编辑此资源".to_string()
+                "没有权限编辑此资源".to_string(),
             ));
         }
 
         // 检查资源类型是否为web_markdown
         if resource.resource_type != "web_markdown" {
             return Err(ResourceError::ValidationError(
-                "只有Markdown类型资源可以在线编辑".to_string()
+                "只有Markdown类型资源可以在线编辑".to_string(),
             ));
         }
 
         // AI 审核更新后的内容
-        let ai_result = AiService::audit_resource(
-            &resource.title,
-            Some(&content),
-            Some(content.as_bytes()),
-        )
-        .await
-        .map_err(|e| ResourceError::AiError(e.to_string()))?;
+        let ai_result =
+            AiService::audit_resource(&resource.title, Some(&content), Some(content.as_bytes()))
+                .await
+                .map_err(|e| ResourceError::AiError(e.to_string()))?;
 
         // 更新文件内容
-        FileService::write_resource_file(&resource.file_path, content.as_bytes()).await?;
+        storage
+            .write_file(
+                &resource.file_path,
+                content.as_bytes().to_vec(),
+                Some("text/markdown"),
+            )
+            .await?;
 
         // 计算新的文件哈希和大小（使用字节长度而非字符长度）
         let file_hash = crate::services::FileService::calculate_hash(content.as_bytes());
@@ -988,13 +1312,17 @@ impl ResourceService {
                 ai_reject_reason = $5
             WHERE id = $6
             RETURNING updated_at
-            "#
+            "#,
         )
         .bind(file_hash)
         .bind(file_size)
         .bind(audit_status.to_string())
         .bind(ai_result.accuracy_score)
-        .bind(if ai_result.passed { None } else { ai_result.reason })
+        .bind(if ai_result.passed {
+            None
+        } else {
+            ai_result.reason
+        })
         .bind(resource_id)
         .fetch_one(pool)
         .await
@@ -1009,28 +1337,30 @@ impl ResourceService {
     /// 获取资源原始内容（用于编辑）
     pub async fn get_resource_content_raw(
         pool: &PgPool,
+        storage: &Arc<dyn super::StorageBackend>,
         user: &CurrentUser,
         resource_id: Uuid,
     ) -> Result<String, ResourceError> {
         // 获取资源信息
-        let resource: crate::models::Resource = sqlx::query_as::<_, crate::models::Resource>(
-            "SELECT * FROM resources WHERE id = $1"
-        )
-        .bind(resource_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
-        .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
+        let resource: crate::models::Resource =
+            sqlx::query_as::<_, crate::models::Resource>("SELECT * FROM resources WHERE id = $1")
+                .bind(resource_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
+                .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
 
         // 检查权限（上传者或管理员）
         if resource.uploader_id != user.id && user.role != crate::models::UserRole::Admin {
             return Err(ResourceError::Unauthorized(
-                "没有权限查看此资源的原始内容".to_string()
+                "没有权限查看此资源的原始内容".to_string(),
             ));
         }
 
-        // 读取文件内容
-        let content = FileService::read_resource_file_to_string(&resource.file_path).await?;
+        // 读取文件内容（统一走存储抽象，兼容 local/oss）
+        let content_bytes = storage.read_file(&resource.file_path).await?;
+        let content = String::from_utf8(content_bytes)
+            .map_err(|e| ResourceError::FileError(format!("文件内容不是有效 UTF-8: {}", e)))?;
 
         Ok(content)
     }
@@ -1068,7 +1398,7 @@ impl ResourceService {
             LEFT JOIN resource_stats rs ON r.id = rs.resource_id
             ORDER BY COALESCE(rs.views, 0) DESC, COALESCE(rs.downloads, 0) DESC, r.created_at DESC
             LIMIT $1
-            "#
+            "#,
         )
         .bind(limit as i64)
         .fetch_all(pool)
@@ -1083,10 +1413,16 @@ impl ResourceService {
         let mut resources = Vec::new();
         for row in rows {
             resources.push(crate::models::HotResourceItem {
-                id: row.try_get("id").map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
-                title: row.try_get("title").map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
+                id: row
+                    .try_get("id")
+                    .map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
+                title: row
+                    .try_get("title")
+                    .map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
                 course_name: row.try_get("course_name").ok(),
-                resource_type: row.try_get("resource_type").map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
+                resource_type: row
+                    .try_get("resource_type")
+                    .map_err(|e| ResourceError::DatabaseError(e.to_string()))?,
                 downloads: row.try_get::<i32, _>("downloads").unwrap_or(0),
                 views: row.try_get::<i32, _>("views").unwrap_or(0),
                 likes: row.try_get::<i32, _>("likes").unwrap_or(0),

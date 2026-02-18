@@ -65,13 +65,16 @@ impl Image {
 
 impl From<Image> for ImageInfoResponse {
     fn from(image: Image) -> Self {
-        let base_url = std::env::var("IMAGE_BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+        let base_url =
+            std::env::var("IMAGE_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
 
         ImageInfoResponse {
             id: image.id,
             url: image.get_public_url(&base_url),
-            markdown_link: image.get_markdown_link(&base_url, &image.original_name.as_deref().unwrap_or("image")),
+            markdown_link: image.get_markdown_link(
+                &base_url,
+                &image.original_name.as_deref().unwrap_or("image"),
+            ),
             original_name: image.original_name.clone(),
             file_size: image.file_size,
             mime_type: image.mime_type.clone(),

@@ -30,8 +30,7 @@ impl FileService {
 
     /// 资源上传路径
     pub fn get_resource_upload_path() -> String {
-        std::env::var("RESOURCE_UPLOAD_PATH")
-            .unwrap_or_else(|_| "./uploads/resources".to_string())
+        std::env::var("RESOURCE_UPLOAD_PATH").unwrap_or_else(|_| "./uploads/resources".to_string())
     }
 
     /// 计算文件 SHA-256 哈希
@@ -252,9 +251,13 @@ impl FileService {
         match extension.map(|e| e.to_lowercase()).as_deref() {
             Some("md") => "text/markdown",
             Some("ppt") => "application/vnd.ms-powerpoint",
-            Some("pptx") => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            Some("pptx") => {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            }
             Some("doc") => "application/msword",
-            Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            Some("docx") => {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            }
             Some("pdf") => "application/pdf",
             Some("txt") => "text/plain",
             Some("jpeg") | Some("jpg") => "image/jpeg",
@@ -286,7 +289,8 @@ mod tests {
     #[test]
     fn test_validate_resource_file_too_large() {
         let large_data = vec![0u8; FileService::MAX_FILE_SIZE + 1];
-        let result = FileService::validate_resource_file("test.pdf", &large_data, Some("application/pdf"));
+        let result =
+            FileService::validate_resource_file("test.pdf", &large_data, Some("application/pdf"));
         assert!(result.is_err());
     }
 
@@ -294,7 +298,10 @@ mod tests {
     fn test_resource_type_from_extension() {
         assert_eq!(ResourceType::from_extension("pdf"), ResourceType::Pdf);
         assert_eq!(ResourceType::from_extension("PDF"), ResourceType::Pdf);
-        assert_eq!(ResourceType::from_extension("md"), ResourceType::WebMarkdown);
+        assert_eq!(
+            ResourceType::from_extension("md"),
+            ResourceType::WebMarkdown
+        );
         assert_eq!(ResourceType::from_extension("jpg"), ResourceType::Jpg);
         assert_eq!(ResourceType::from_extension("unknown"), ResourceType::Other);
     }

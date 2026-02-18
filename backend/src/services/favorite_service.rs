@@ -1,6 +1,7 @@
 use sqlx::PgPool;
-use uuid::Uuid;
 use std::io::Write;
+use std::sync::Arc;
+use uuid::Uuid;
 
 /// 计算平均分辅助函数
 fn calc_avg(total: Option<i32>, count: Option<i32>) -> Option<f64> {
@@ -33,7 +34,7 @@ impl FavoriteService {
 
         // 检查是否已存在同名收藏夹
         let existing = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM favorites WHERE user_id = $1 AND name = $2"
+            "SELECT COUNT(*) FROM favorites WHERE user_id = $1 AND name = $2",
         )
         .bind(user_id)
         .bind(name)
@@ -42,7 +43,7 @@ impl FavoriteService {
 
         if existing > 0 {
             return Err(ResourceError::ValidationError(
-                "您已存在同名收藏夹".to_string()
+                "您已存在同名收藏夹".to_string(),
             ));
         }
 
@@ -97,8 +98,14 @@ impl FavoriteService {
                 id: row.id,
                 name: row.name,
                 resource_count: row.resource_count.unwrap_or(0),
-                created_at: row.created_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
-                    .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+                created_at: row
+                    .created_at
+                    .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+                    .unwrap_or_else(|| {
+                        chrono::Local::now()
+                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                            .to_string()
+                    }),
             })
             .collect();
 
@@ -114,13 +121,12 @@ impl FavoriteService {
         user_id: Uuid,
     ) -> Result<FavoriteDetailResponse, ResourceError> {
         // 验证收藏夹所有权
-        let favorite = sqlx::query_as::<_, Favorite>(
-            "SELECT * FROM favorites WHERE id = $1 AND user_id = $2"
-        )
-        .bind(favorite_id)
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
+        let favorite =
+            sqlx::query_as::<_, Favorite>("SELECT * FROM favorites WHERE id = $1 AND user_id = $2")
+                .bind(favorite_id)
+                .bind(user_id)
+                .fetch_optional(pool)
+                .await?;
 
         let favorite = match favorite {
             Some(f) => f,
@@ -167,15 +173,18 @@ impl FavoriteService {
             .into_iter()
             .map(|row| {
                 // 解析 tags JSON 字段
-                let tags: Option<Vec<String>> = row.tags.and_then(|t| {
-                    serde_json::from_value::<Vec<String>>(t).ok()
-                });
+                let tags: Option<Vec<String>> = row
+                    .tags
+                    .and_then(|t| serde_json::from_value::<Vec<String>>(t).ok());
 
                 // 计算各维度的平均分
                 let avg_difficulty = calc_avg(row.difficulty_total, row.difficulty_count);
-                let avg_overall_quality = calc_avg(row.overall_quality_total, row.overall_quality_count);
-                let avg_answer_quality = calc_avg(row.answer_quality_total, row.answer_quality_count);
-                let avg_format_quality = calc_avg(row.format_quality_total, row.format_quality_count);
+                let avg_overall_quality =
+                    calc_avg(row.overall_quality_total, row.overall_quality_count);
+                let avg_answer_quality =
+                    calc_avg(row.answer_quality_total, row.answer_quality_count);
+                let avg_format_quality =
+                    calc_avg(row.format_quality_total, row.format_quality_count);
                 let avg_detail_level = calc_avg(row.detail_level_total, row.detail_level_count);
 
                 // 评分人数取各维度中的最大值
@@ -185,7 +194,11 @@ impl FavoriteService {
                     row.answer_quality_count.unwrap_or(0),
                     row.format_quality_count.unwrap_or(0),
                     row.detail_level_count.unwrap_or(0),
-                ].iter().max().copied().unwrap_or(0) as i32;
+                ]
+                .iter()
+                .max()
+                .copied()
+                .unwrap_or(0) as i32;
 
                 FavoriteResourceItem {
                     id: row.id,
@@ -195,8 +208,16 @@ impl FavoriteService {
                     category: row.category.unwrap_or_default(),
                     tags,
                     file_size: row.file_size,
-                    added_at: row.added_at.map(|dt: chrono::NaiveDateTime| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
-                        .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+                    added_at: row
+                        .added_at
+                        .map(|dt: chrono::NaiveDateTime| {
+                            dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+                        })
+                        .unwrap_or_else(|| {
+                            chrono::Local::now()
+                                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                                .to_string()
+                        }),
                     stats: FavoriteResourceStats {
                         views: row.views.unwrap_or(0),
                         downloads: row.downloads.unwrap_or(0),
@@ -217,7 +238,10 @@ impl FavoriteService {
         Ok(FavoriteDetailResponse {
             id: favorite.id,
             name: favorite.name,
-            created_at: favorite.created_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            created_at: favorite
+                .created_at
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
             resource_count,
             resources,
         })
@@ -236,13 +260,12 @@ impl FavoriteService {
         let name = request.name.trim();
 
         // 检查收藏夹是否存在且属于当前用户
-        let existing = sqlx::query_as::<_, Favorite>(
-            "SELECT * FROM favorites WHERE id = $1 AND user_id = $2"
-        )
-        .bind(favorite_id)
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
+        let existing =
+            sqlx::query_as::<_, Favorite>("SELECT * FROM favorites WHERE id = $1 AND user_id = $2")
+                .bind(favorite_id)
+                .bind(user_id)
+                .fetch_optional(pool)
+                .await?;
 
         if existing.is_none() {
             return Err(ResourceError::NotFound("收藏夹不存在".to_string()));
@@ -250,7 +273,7 @@ impl FavoriteService {
 
         // 检查是否已存在其他同名收藏夹
         let duplicate = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM favorites WHERE user_id = $1 AND name = $2 AND id != $3"
+            "SELECT COUNT(*) FROM favorites WHERE user_id = $1 AND name = $2 AND id != $3",
         )
         .bind(user_id)
         .bind(name)
@@ -260,7 +283,7 @@ impl FavoriteService {
 
         if duplicate > 0 {
             return Err(ResourceError::ValidationError(
-                "您已存在同名收藏夹".to_string()
+                "您已存在同名收藏夹".to_string(),
             ));
         }
 
@@ -281,13 +304,11 @@ impl FavoriteService {
         user_id: Uuid,
     ) -> Result<(), ResourceError> {
         // 检查收藏夹是否存在且属于当前用户
-        let result = sqlx::query(
-            "DELETE FROM favorites WHERE id = $1 AND user_id = $2"
-        )
-        .bind(favorite_id)
-        .bind(user_id)
-        .execute(pool)
-        .await?;
+        let result = sqlx::query("DELETE FROM favorites WHERE id = $1 AND user_id = $2")
+            .bind(favorite_id)
+            .bind(user_id)
+            .execute(pool)
+            .await?;
 
         if result.rows_affected() == 0 {
             return Err(ResourceError::NotFound("收藏夹不存在".to_string()));
@@ -304,25 +325,23 @@ impl FavoriteService {
         request: AddToFavoriteRequest,
     ) -> Result<(), ResourceError> {
         // 检查收藏夹是否存在且属于当前用户
-        let favorite = sqlx::query_as::<_, Favorite>(
-            "SELECT * FROM favorites WHERE id = $1 AND user_id = $2"
-        )
-        .bind(favorite_id)
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
+        let favorite =
+            sqlx::query_as::<_, Favorite>("SELECT * FROM favorites WHERE id = $1 AND user_id = $2")
+                .bind(favorite_id)
+                .bind(user_id)
+                .fetch_optional(pool)
+                .await?;
 
         if favorite.is_none() {
             return Err(ResourceError::NotFound("收藏夹不存在".to_string()));
         }
 
         // 检查资源是否存在
-        let resource_exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM resources WHERE id = $1)"
-        )
-        .bind(request.resource_id)
-        .fetch_one(pool)
-        .await?;
+        let resource_exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM resources WHERE id = $1)")
+                .bind(request.resource_id)
+                .fetch_one(pool)
+                .await?;
 
         if !resource_exists {
             return Err(ResourceError::NotFound("资源不存在".to_string()));
@@ -339,18 +358,16 @@ impl FavoriteService {
 
         if already_in {
             return Err(ResourceError::ValidationError(
-                "资源已在收藏夹中".to_string()
+                "资源已在收藏夹中".to_string(),
             ));
         }
 
         // 添加资源到收藏夹
-        sqlx::query(
-            "INSERT INTO favorite_resources (favorite_id, resource_id) VALUES ($1, $2)"
-        )
-        .bind(favorite_id)
-        .bind(request.resource_id)
-        .execute(pool)
-        .await?;
+        sqlx::query("INSERT INTO favorite_resources (favorite_id, resource_id) VALUES ($1, $2)")
+            .bind(favorite_id)
+            .bind(request.resource_id)
+            .execute(pool)
+            .await?;
 
         Ok(())
     }
@@ -363,13 +380,12 @@ impl FavoriteService {
         user_id: Uuid,
     ) -> Result<(), ResourceError> {
         // 检查收藏夹是否存在且属于当前用户
-        let favorite = sqlx::query_as::<_, Favorite>(
-            "SELECT * FROM favorites WHERE id = $1 AND user_id = $2"
-        )
-        .bind(favorite_id)
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
+        let favorite =
+            sqlx::query_as::<_, Favorite>("SELECT * FROM favorites WHERE id = $1 AND user_id = $2")
+                .bind(favorite_id)
+                .bind(user_id)
+                .fetch_optional(pool)
+                .await?;
 
         if favorite.is_none() {
             return Err(ResourceError::NotFound("收藏夹不存在".to_string()));
@@ -377,7 +393,7 @@ impl FavoriteService {
 
         // 删除关联
         let result = sqlx::query(
-            "DELETE FROM favorite_resources WHERE favorite_id = $1 AND resource_id = $2"
+            "DELETE FROM favorite_resources WHERE favorite_id = $1 AND resource_id = $2",
         )
         .bind(favorite_id)
         .bind(resource_id)
@@ -398,12 +414,11 @@ impl FavoriteService {
         resource_id: Uuid,
     ) -> Result<CheckResourceInFavoriteResponse, ResourceError> {
         // 检查资源是否存在
-        let resource_exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM resources WHERE id = $1)"
-        )
-        .bind(resource_id)
-        .fetch_one(pool)
-        .await?;
+        let resource_exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM resources WHERE id = $1)")
+                .bind(resource_id)
+                .fetch_one(pool)
+                .await?;
 
         if !resource_exists {
             return Err(ResourceError::NotFound("资源不存在".to_string()));
@@ -438,13 +453,12 @@ impl FavoriteService {
         user_id: Uuid,
     ) -> Result<Vec<(Uuid, String, String, String, i64)>, ResourceError> {
         // 检查收藏夹是否存在且属于当前用户
-        let favorite = sqlx::query_as::<_, Favorite>(
-            "SELECT * FROM favorites WHERE id = $1 AND user_id = $2"
-        )
-        .bind(favorite_id)
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?;
+        let favorite =
+            sqlx::query_as::<_, Favorite>("SELECT * FROM favorites WHERE id = $1 AND user_id = $2")
+                .bind(favorite_id)
+                .bind(user_id)
+                .fetch_optional(pool)
+                .await?;
 
         if favorite.is_none() {
             return Err(ResourceError::NotFound("收藏夹不存在".to_string()));
@@ -471,6 +485,7 @@ impl FavoriteService {
     /// 限制：最多 100 个文件，总大小不超过 500MB
     pub async fn pack_favorite_resources(
         pool: &PgPool,
+        storage: &Arc<dyn super::StorageBackend>,
         favorite_id: Uuid,
         user_id: Uuid,
         favorite_name: &str,
@@ -485,19 +500,20 @@ impl FavoriteService {
         // 检查文件数量限制
         const MAX_FILES: usize = 100;
         if resources.len() > MAX_FILES {
-            return Err(ResourceError::ValidationError(
-                format!("收藏夹资源数量超过限制，最多支持 {} 个文件", MAX_FILES)
-            ));
+            return Err(ResourceError::ValidationError(format!(
+                "收藏夹资源数量超过限制，最多支持 {} 个文件",
+                MAX_FILES
+            )));
         }
 
         // 计算总文件大小并检查限制
         const MAX_TOTAL_SIZE: i64 = 500 * 1024 * 1024; // 500MB
         let total_size: i64 = resources.iter().map(|(_, _, _, _, size)| size).sum();
         if total_size > MAX_TOTAL_SIZE {
-            return Err(ResourceError::ValidationError(
-                format!("收藏夹资源总大小超过限制，最大支持 500MB，当前 {:.2}MB",
-                    total_size as f64 / 1024.0 / 1024.0)
-            ));
+            return Err(ResourceError::ValidationError(format!(
+                "收藏夹资源总大小超过限制，最大支持 500MB，当前 {:.2}MB",
+                total_size as f64 / 1024.0 / 1024.0
+            )));
         }
 
         // 在内存中创建 ZIP 文件
@@ -509,24 +525,35 @@ impl FavoriteService {
                 .unix_permissions(0o644);
 
             // 用于检测文件名冲突
-            let mut file_names: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            let mut file_names: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
 
             for (resource_id, title, file_path, resource_type, _) in &resources {
                 // 读取文件内容
-                let file_content = match tokio::fs::read(file_path).await {
+                let file_content = match storage.read_file(file_path).await {
                     Ok(content) => content,
                     Err(e) => {
-                        log::warn!("读取资源文件失败: resource_id={}, path={}, error={}",
-                            resource_id, file_path, e);
+                        log::warn!(
+                            "读取资源文件失败: resource_id={}, path={}, error={}",
+                            resource_id,
+                            file_path,
+                            e
+                        );
                         continue; // 跳过无法读取的文件
                     }
                 };
 
                 // 生成安全的文件名 - 保留 Unicode 字符（包括中文），只替换文件系统不安全字符
-                let safe_title = title.chars()
+                let safe_title = title
+                    .chars()
                     .map(|c| {
                         // 文件系统不安全的字符: / \ ? % * : | " < > 和控制字符
-                        if c.is_control() || matches!(c, '/' | '\\' | '?' | '%' | '*' | ':' | '|' | '"' | '<' | '>') {
+                        if c.is_control()
+                            || matches!(
+                                c,
+                                '/' | '\\' | '?' | '%' | '*' | ':' | '|' | '"' | '<' | '>'
+                            )
+                        {
                             '_'
                         } else {
                             c
@@ -569,7 +596,11 @@ impl FavoriteService {
                     continue;
                 }
 
-                log::debug!("已添加文件到ZIP: {} ({} bytes)", file_name, file_content.len());
+                log::debug!(
+                    "已添加文件到ZIP: {} ({} bytes)",
+                    file_name,
+                    file_content.len()
+                );
             }
 
             // 完成 ZIP 文件
@@ -579,10 +610,16 @@ impl FavoriteService {
         }
 
         // 生成下载文件名 - 保留 Unicode 字符（包括中文），只替换文件系统不安全字符
-        let safe_favorite_name = favorite_name.chars()
+        let safe_favorite_name = favorite_name
+            .chars()
             .map(|c| {
                 // 文件系统不安全的字符: / \ ? % * : | " < > 和控制字符
-                if c.is_control() || matches!(c, '/' | '\\' | '?' | '%' | '*' | ':' | '|' | '"' | '<' | '>') {
+                if c.is_control()
+                    || matches!(
+                        c,
+                        '/' | '\\' | '?' | '%' | '*' | ':' | '|' | '"' | '<' | '>'
+                    )
+                {
                     '_'
                 } else {
                     c
@@ -592,7 +629,11 @@ impl FavoriteService {
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
         let download_filename = format!("{}_{}.zip", safe_favorite_name, timestamp);
 
-        log::info!("打包下载完成: {}, 文件大小: {} bytes", download_filename, zip_buffer.len());
+        log::info!(
+            "打包下载完成: {}, 文件大小: {} bytes",
+            download_filename,
+            zip_buffer.len()
+        );
 
         Ok((zip_buffer, download_filename))
     }

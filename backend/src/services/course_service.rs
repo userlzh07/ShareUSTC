@@ -1,8 +1,8 @@
 use sqlx::PgPool;
 
 use crate::models::{
-    Course, CourseListQuery, CourseListResponse, CreateCourseRequest,
-    UpdateCourseRequest, UpdateCourseStatusRequest,
+    Course, CourseListQuery, CourseListResponse, CreateCourseRequest, UpdateCourseRequest,
+    UpdateCourseStatusRequest,
 };
 
 /// 课程服务错误类型

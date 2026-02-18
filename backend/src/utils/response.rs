@@ -18,7 +18,8 @@ pub fn error_response(status: u16, message: &str) -> HttpResponse {
     };
 
     HttpResponse::build(
-        actix_web::http::StatusCode::from_u16(status).unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR)
+        actix_web::http::StatusCode::from_u16(status)
+            .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR),
     )
     .json(serde_json::json!({
         "error": error,

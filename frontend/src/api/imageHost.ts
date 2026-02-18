@@ -1,5 +1,7 @@
 import request from './request';
 import logger from '../utils/logger';
+import { getOssStatus, getStsToken, imageUploadCallback } from './oss';
+import { uploadToOssWithSts, uploadToSignedUrl } from '../utils/oss-upload';
 import type { Image, ImageUploadResponse, ImageListResponse, ImageListQuery } from '../types/image';
 
 /**
@@ -12,6 +14,42 @@ export const uploadImage = async (
   file: File,
   onProgress?: (percent: number) => void
 ): Promise<ImageUploadResponse> => {
+  const ossStatus = await getOssStatus().catch(() => null);
+  if (ossStatus?.storageBackend === 'oss') {
+    const token = await getStsToken({
+      fileType: 'image',
+      fileName: file.name,
+      fileSize: file.size,
+      contentType: file.type || undefined
+    });
+
+    if (token.uploadMode === 'sts') {
+      await uploadToOssWithSts({
+        endpoint: token.endpoint,
+        region: token.region,
+        bucket: token.bucket,
+        uploadKey: token.uploadKey,
+        accessKeyId: token.accessKeyId,
+        accessKeySecret: token.accessKeySecret,
+        securityToken: token.securityToken,
+        file,
+        onProgress
+      });
+    } else {
+      await uploadToSignedUrl({
+        uploadUrl: token.uploadUrl,
+        file,
+        contentType: file.type || undefined,
+        onProgress
+      });
+    }
+
+    return imageUploadCallback({
+      ossKey: token.uploadKey,
+      originalName: file.name
+    });
+  }
+
   const formData = new FormData();
   formData.append('image', file);
 

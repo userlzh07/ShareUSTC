@@ -34,7 +34,7 @@ pub struct CommentResponse {
     pub user_avatar: Option<String>,
     pub content: String,
     #[serde(rename = "createdAt")]
-    pub created_at: String,  // 使用 String 类型，在构造时格式化为 ISO 8601 格式
+    pub created_at: String, // 使用 String 类型，在构造时格式化为 ISO 8601 格式
 }
 
 /// 评论列表查询

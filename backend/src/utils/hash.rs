@@ -1,7 +1,5 @@
 use argon2::{
-    password_hash::{
-        PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
-    },
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
 use rand::rngs::OsRng;
@@ -41,8 +39,7 @@ pub fn hash_password(password: &str) -> Result<String, String> {
 /// * `Err(String)` - 错误信息
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
     // 解析存储的密码哈希
-    let parsed_hash =
-        PasswordHash::new(hash).map_err(|e| format!("密码哈希格式错误: {}", e))?;
+    let parsed_hash = PasswordHash::new(hash).map_err(|e| format!("密码哈希格式错误: {}", e))?;
 
     // 验证密码
     let argon2 = Argon2::default();

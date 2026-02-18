@@ -1,8 +1,8 @@
-use crate::models::{
-    UpdateProfileRequest, User, UserInfo, UserProfileResponse, VerificationRequest,
-    UserHomepageResponse, UserHomepageQuery,
-};
 use crate::models::resource::{ResourceListItem, ResourceStatsResponse};
+use crate::models::{
+    UpdateProfileRequest, User, UserHomepageQuery, UserHomepageResponse, UserInfo,
+    UserProfileResponse, VerificationRequest,
+};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -54,7 +54,10 @@ impl UserService {
     }
 
     /// 获取用户公开资料
-    pub async fn get_user_profile(pool: &PgPool, user_id: Uuid) -> Result<UserProfileResponse, UserError> {
+    pub async fn get_user_profile(
+        pool: &PgPool,
+        user_id: Uuid,
+    ) -> Result<UserProfileResponse, UserError> {
         // 获取用户基本信息
         let user: User = sqlx::query_as::<_, User>(
             "SELECT id, sn, username, password_hash, email, role, bio,
@@ -70,19 +73,18 @@ impl UserService {
         .ok_or_else(|| UserError::UserNotFound("用户不存在".to_string()))?;
 
         // 获取用户上传的资源数量
-        let uploads_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM resources WHERE uploader_id = $1"
-        )
-        .bind(user_id)
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+        let uploads_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM resources WHERE uploader_id = $1")
+                .bind(user_id)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0);
 
         // 获取总点赞数
         let total_likes: i64 = sqlx::query_scalar(
             "SELECT COALESCE(SUM(likes), 0) FROM resource_stats rs
              JOIN resources r ON rs.resource_id = r.id
-             WHERE r.uploader_id = $1"
+             WHERE r.uploader_id = $1",
         )
         .bind(user_id)
         .fetch_one(pool)
@@ -93,7 +95,7 @@ impl UserService {
         let total_downloads: i64 = sqlx::query_scalar(
             "SELECT COALESCE(SUM(downloads), 0) FROM resource_stats rs
              JOIN resources r ON rs.resource_id = r.id
-             WHERE r.uploader_id = $1"
+             WHERE r.uploader_id = $1",
         )
         .bind(user_id)
         .fetch_one(pool)
@@ -128,13 +130,12 @@ impl UserService {
         is_verified: bool,
     ) -> Result<UserInfo, UserError> {
         // 验证请求
-        req.validate()
-            .map_err(|e| UserError::ValidationError(e))?;
+        req.validate().map_err(|e| UserError::ValidationError(e))?;
 
         // 检查用户名是否已被使用
         if let Some(ref username) = req.username {
             let existing: Option<(Uuid,)> = sqlx::query_as(
-                "SELECT id FROM users WHERE username = $1 AND id != $2 AND is_active = true"
+                "SELECT id FROM users WHERE username = $1 AND id != $2 AND is_active = true",
             )
             .bind(username)
             .bind(user_id)
@@ -143,9 +144,7 @@ impl UserService {
             .map_err(|e| UserError::DatabaseError(e.to_string()))?;
 
             if existing.is_some() {
-                return Err(UserError::UserExists(
-                    "用户名已被使用".to_string()
-                ));
+                return Err(UserError::UserExists("用户名已被使用".to_string()));
             }
         }
 
@@ -268,7 +267,7 @@ impl UserService {
 
         // 获取用户上传的已通过审核的资源数量
         let uploads_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM resources WHERE uploader_id = $1 AND audit_status = 'approved'"
+            "SELECT COUNT(*) FROM resources WHERE uploader_id = $1 AND audit_status = 'approved'",
         )
         .bind(user_id)
         .fetch_one(pool)
@@ -279,7 +278,7 @@ impl UserService {
         let total_likes: i64 = sqlx::query_scalar(
             "SELECT COALESCE(SUM(likes), 0) FROM resource_stats rs
              JOIN resources r ON rs.resource_id = r.id
-             WHERE r.uploader_id = $1 AND r.audit_status = 'approved'"
+             WHERE r.uploader_id = $1 AND r.audit_status = 'approved'",
         )
         .bind(user_id)
         .fetch_one(pool)
@@ -290,7 +289,7 @@ impl UserService {
         let total_downloads: i64 = sqlx::query_scalar(
             "SELECT COALESCE(SUM(downloads), 0) FROM resource_stats rs
              JOIN resources r ON rs.resource_id = r.id
-             WHERE r.uploader_id = $1 AND r.audit_status = 'approved'"
+             WHERE r.uploader_id = $1 AND r.audit_status = 'approved'",
         )
         .bind(user_id)
         .fetch_one(pool)
@@ -318,7 +317,7 @@ impl UserService {
             WHERE r.uploader_id = $1 AND r.audit_status = 'approved'
             ORDER BY r.created_at DESC
             LIMIT $2 OFFSET $3
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(per_page as i64)
@@ -331,9 +330,8 @@ impl UserService {
         let mut resources = Vec::new();
         for row in rows {
             let tags_json: Option<serde_json::Value> = row.try_get("tags").ok();
-            let tags: Option<Vec<String>> = tags_json.and_then(|t| {
-                serde_json::from_value::<Vec<String>>(t).ok()
-            });
+            let tags: Option<Vec<String>> =
+                tags_json.and_then(|t| serde_json::from_value::<Vec<String>>(t).ok());
 
             // 计算各维度的平均分
             let calc_avg = |total: Option<i32>, count: Option<i32>| -> Option<f64> {
@@ -371,17 +369,33 @@ impl UserService {
                 row.try_get::<i32, _>("answer_quality_count").unwrap_or(0),
                 row.try_get::<i32, _>("format_quality_count").unwrap_or(0),
                 row.try_get::<i32, _>("detail_level_count").unwrap_or(0),
-            ].iter().max().copied().unwrap_or(0);
+            ]
+            .iter()
+            .max()
+            .copied()
+            .unwrap_or(0);
 
             resources.push(ResourceListItem {
-                id: row.try_get("id").map_err(|e| UserError::DatabaseError(e.to_string()))?,
-                title: row.try_get("title").map_err(|e| UserError::DatabaseError(e.to_string()))?,
+                id: row
+                    .try_get("id")
+                    .map_err(|e| UserError::DatabaseError(e.to_string()))?,
+                title: row
+                    .try_get("title")
+                    .map_err(|e| UserError::DatabaseError(e.to_string()))?,
                 course_name: row.try_get("course_name").ok(),
-                resource_type: row.try_get("resource_type").map_err(|e| UserError::DatabaseError(e.to_string()))?,
-                category: row.try_get("category").map_err(|e| UserError::DatabaseError(e.to_string()))?,
+                resource_type: row
+                    .try_get("resource_type")
+                    .map_err(|e| UserError::DatabaseError(e.to_string()))?,
+                category: row
+                    .try_get("category")
+                    .map_err(|e| UserError::DatabaseError(e.to_string()))?,
                 tags,
-                audit_status: row.try_get("audit_status").map_err(|e| UserError::DatabaseError(e.to_string()))?,
-                created_at: row.try_get("created_at").map_err(|e| UserError::DatabaseError(e.to_string()))?,
+                audit_status: row
+                    .try_get("audit_status")
+                    .map_err(|e| UserError::DatabaseError(e.to_string()))?,
+                created_at: row
+                    .try_get("created_at")
+                    .map_err(|e| UserError::DatabaseError(e.to_string()))?,
                 stats: ResourceStatsResponse {
                     views: row.try_get::<i32, _>("views").unwrap_or(0),
                     downloads: row.try_get::<i32, _>("downloads").unwrap_or(0),

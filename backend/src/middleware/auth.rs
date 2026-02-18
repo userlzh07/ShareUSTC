@@ -102,9 +102,10 @@ impl JwtAuth {
     /// 检查路径是否是公开路径（预留接口）
     #[allow(dead_code)]
     fn is_public_path(&self, path: &str, method: &Method) -> bool {
-        self.public_paths.iter().any(|rule| rule.matches(path, method))
+        self.public_paths
+            .iter()
+            .any(|rule| rule.matches(path, method))
     }
-
 }
 
 impl<S, B> Transform<S, ServiceRequest> for JwtAuth
@@ -176,7 +177,11 @@ where
                     Ok(claims) => {
                         match extract_current_user(claims) {
                             Ok(current_user) => {
-                                log::debug!("用户认证成功: {}, 角色: {:?}", current_user.username, current_user.role);
+                                log::debug!(
+                                    "用户认证成功: {}, 角色: {:?}",
+                                    current_user.username,
+                                    current_user.role
+                                );
                                 // 将用户信息存入请求扩展
                                 req.extensions_mut().insert(current_user);
                             }

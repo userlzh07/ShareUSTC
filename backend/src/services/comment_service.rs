@@ -19,26 +19,37 @@ impl CommentService {
         // 验证评论内容
         let content = request.content.trim();
         if content.is_empty() {
-            return Err(ResourceError::ValidationError("评论内容不能为空".to_string()));
+            return Err(ResourceError::ValidationError(
+                "评论内容不能为空".to_string(),
+            ));
         }
         if content.len() > 1000 {
-            return Err(ResourceError::ValidationError("评论内容不能超过1000字".to_string()));
+            return Err(ResourceError::ValidationError(
+                "评论内容不能超过1000字".to_string(),
+            ));
         }
 
         // 验证资源是否存在
-        let resource_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM resources WHERE id = $1)"
-        )
-        .bind(resource_id)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+        let resource_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM resources WHERE id = $1)")
+                .bind(resource_id)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
         if !resource_exists {
-            return Err(ResourceError::NotFound(format!("资源 {} 不存在", resource_id)));
+            return Err(ResourceError::NotFound(format!(
+                "资源 {} 不存在",
+                resource_id
+            )));
         }
 
-        log::debug!("[CommentService] 开始创建评论: resource_id={}, user_id={}, content={}", resource_id, user_id, content);
+        log::debug!(
+            "[CommentService] 开始创建评论: resource_id={}, user_id={}, content={}",
+            resource_id,
+            user_id,
+            content
+        );
 
         // 直接插入不使用事务（简化排查）
         let comment = sqlx::query_as::<_, Comment>(
@@ -62,11 +73,12 @@ impl CommentService {
 
         // 获取用户信息
         let (user_name, user_avatar) = match sqlx::query_as::<_, (String, Option<String>)>(
-            "SELECT username, avatar_url FROM users WHERE id = $1"
+            "SELECT username, avatar_url FROM users WHERE id = $1",
         )
         .bind(user_id)
         .fetch_one(pool)
-        .await {
+        .await
+        {
             Ok((name, avatar)) => (name, avatar),
             Err(e) => {
                 log::warn!("[CommentService] 获取用户信息失败: {}", e);
@@ -74,7 +86,11 @@ impl CommentService {
             }
         };
 
-        log::debug!("[CommentService] 评论创建完成: comment_id={}, user_name={}", comment.id, user_name);
+        log::debug!(
+            "[CommentService] 评论创建完成: comment_id={}, user_name={}",
+            comment.id,
+            user_name
+        );
 
         // 发送通知给资源上传者（如果不是评论自己的资源）
         Self::notify_uploader_on_comment(pool, resource_id, user_id, &user_name).await;
@@ -86,7 +102,10 @@ impl CommentService {
             user_name,
             user_avatar,
             content: comment.content,
-            created_at: comment.created_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+            created_at: comment
+                .created_at
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
         })
     }
 
@@ -99,7 +118,7 @@ impl CommentService {
     ) {
         // 获取资源上传者信息
         let result = sqlx::query_as::<_, (Uuid, String, Option<Uuid>)>(
-            "SELECT uploader_id, title, author_id FROM resources WHERE id = $1"
+            "SELECT uploader_id, title, author_id FROM resources WHERE id = $1",
         )
         .bind(resource_id)
         .fetch_optional(pool)
@@ -117,7 +136,9 @@ impl CommentService {
                     &resource_title,
                     notify_user_id,
                     commenter_name,
-                ).await {
+                )
+                .await
+                {
                     log::warn!("[CommentService] 发送评论通知失败: {}", e);
                 }
             }
@@ -136,7 +157,7 @@ impl CommentService {
 
         // 获取评论总数
         let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM comments WHERE resource_id = $1 AND audit_status = 'approved'"
+            "SELECT COUNT(*) FROM comments WHERE resource_id = $1 AND audit_status = 'approved'",
         )
         .bind(resource_id)
         .fetch_one(pool)
@@ -174,8 +195,14 @@ impl CommentService {
                 user_name: row.user_name,
                 user_avatar: None,
                 content: row.content,
-                created_at: row.created_at.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
-                    .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()),
+                created_at: row
+                    .created_at
+                    .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+                    .unwrap_or_else(|| {
+                        chrono::Local::now()
+                            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                            .to_string()
+                    }),
             })
             .collect();
 
@@ -195,12 +222,10 @@ impl CommentService {
         is_admin: bool,
     ) -> Result<bool, ResourceError> {
         // 检查评论是否存在且属于该用户（或用户是管理员）
-        let comment = sqlx::query_as::<_, Comment>(
-            "SELECT * FROM comments WHERE id = $1"
-        )
-        .bind(comment_id)
-        .fetch_optional(pool)
-        .await?;
+        let comment = sqlx::query_as::<_, Comment>("SELECT * FROM comments WHERE id = $1")
+            .bind(comment_id)
+            .fetch_optional(pool)
+            .await?;
 
         let comment = match comment {
             Some(c) => c,

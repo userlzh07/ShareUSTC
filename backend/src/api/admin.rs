@@ -3,15 +3,16 @@ use uuid::Uuid;
 
 use crate::db::AppState;
 use crate::models::CurrentUser;
-use crate::services::{
-    AdminService, AdminError, AuditResourceRequest, UpdateUserStatusRequest,
-    AuditLogQuery, TeacherService, TeacherError, CourseService, CourseError,
-};
 use crate::models::{
-    TeacherListQuery, CreateTeacherRequest, UpdateTeacherRequest, UpdateTeacherStatusRequest,
-    CourseListQuery, CreateCourseRequest, UpdateCourseRequest, UpdateCourseStatusRequest,
+    CourseListQuery, CreateCourseRequest, CreateTeacherRequest, TeacherListQuery,
+    UpdateCourseRequest, UpdateCourseStatusRequest, UpdateTeacherRequest,
+    UpdateTeacherStatusRequest,
 };
-use crate::utils::{bad_request, forbidden, not_found, internal_error, no_content};
+use crate::services::{
+    AdminError, AdminService, AuditLogQuery, AuditResourceRequest, CourseError, CourseService,
+    TeacherError, TeacherService, UpdateUserStatusRequest,
+};
+use crate::utils::{bad_request, forbidden, internal_error, no_content, not_found};
 
 /// 检查用户是否是管理员
 fn check_admin(current_user: &CurrentUser) -> Result<(), AdminError> {
@@ -122,8 +123,12 @@ async fn update_user_status(
     }
 
     let user_id = path.into_inner();
-    log::info!("[Admin] 更新用户状态 | admin_id={}, target_user_id={}, is_active={}",
-        user.id, user_id, req.is_active);
+    log::info!(
+        "[Admin] 更新用户状态 | admin_id={}, target_user_id={}, is_active={}",
+        user.id,
+        user_id,
+        req.is_active
+    );
 
     // 禁止禁用自己
     if user_id == user.id {
@@ -131,10 +136,13 @@ async fn update_user_status(
         return bad_request("不能禁用自己的账号");
     }
 
-    match AdminService::update_user_status(&data.pool, user_id, req.is_active
-    ).await {
+    match AdminService::update_user_status(&data.pool, user_id, req.is_active).await {
         Ok(_) => {
-            log::info!("[Admin] 用户状态更新成功 | admin_id={}, target_user_id={}", user.id, user_id);
+            log::info!(
+                "[Admin] 用户状态更新成功 | admin_id={}, target_user_id={}",
+                user.id,
+                user_id
+            );
             HttpResponse::Ok().json(serde_json::json!({
                 "message": "用户状态已更新"
             }))
@@ -166,8 +174,7 @@ async fn get_pending_resources(
         .and_then(|p| p.parse::<i32>().ok())
         .unwrap_or(20);
 
-    match AdminService::get_pending_resources(&data.pool, page, per_page
-    ).await {
+    match AdminService::get_pending_resources(&data.pool, page, per_page).await {
         Ok(response) => HttpResponse::Ok().json(response),
         Err(e) => handle_admin_error(e),
     }
@@ -188,17 +195,27 @@ async fn audit_resource(
     }
 
     let resource_id = path.into_inner();
-    log::info!("[Admin] 审核资源 | admin_id={}, resource_id={}, status={}",
-        user.id, resource_id, req.status);
+    log::info!(
+        "[Admin] 审核资源 | admin_id={}, resource_id={}, status={}",
+        user.id,
+        resource_id,
+        req.status
+    );
 
     match AdminService::audit_resource(
         &data.pool,
         resource_id,
         req.status.clone(),
         req.reason.clone(),
-    ).await {
+    )
+    .await
+    {
         Ok(_) => {
-            log::info!("[Admin] 资源审核完成 | admin_id={}, resource_id={}", user.id, resource_id);
+            log::info!(
+                "[Admin] 资源审核完成 | admin_id={}, resource_id={}",
+                user.id,
+                resource_id
+            );
             HttpResponse::Ok().json(serde_json::json!({
                 "message": "资源审核完成"
             }))
@@ -231,9 +248,7 @@ async fn get_comment_list(
         .unwrap_or(20);
     let audit_status = query.get("auditStatus").cloned();
 
-    match AdminService::get_comment_list(
-        &data.pool, page, per_page, audit_status
-    ).await {
+    match AdminService::get_comment_list(&data.pool, page, per_page, audit_status).await {
         Ok(response) => HttpResponse::Ok().json(response),
         Err(e) => handle_admin_error(e),
     }
@@ -253,11 +268,19 @@ async fn delete_comment(
     }
 
     let comment_id = path.into_inner();
-    log::info!("[Admin] 删除评论 | admin_id={}, comment_id={}", user.id, comment_id);
+    log::info!(
+        "[Admin] 删除评论 | admin_id={}, comment_id={}",
+        user.id,
+        comment_id
+    );
 
     match AdminService::delete_comment(&data.pool, comment_id).await {
         Ok(_) => {
-            log::info!("[Admin] 评论删除成功 | admin_id={}, comment_id={}", user.id, comment_id);
+            log::info!(
+                "[Admin] 评论删除成功 | admin_id={}, comment_id={}",
+                user.id,
+                comment_id
+            );
             no_content()
         }
         Err(e) => handle_admin_error(e),
@@ -280,14 +303,20 @@ async fn audit_comment(
 
     let comment_id = path.into_inner();
     let status = req.get("status").cloned().unwrap_or_default();
-    log::info!("[Admin] 审核评论 | admin_id={}, comment_id={}, status={}",
-        user.id, comment_id, status);
+    log::info!(
+        "[Admin] 审核评论 | admin_id={}, comment_id={}, status={}",
+        user.id,
+        comment_id,
+        status
+    );
 
-    match AdminService::audit_comment(
-        &data.pool, comment_id, status
-    ).await {
+    match AdminService::audit_comment(&data.pool, comment_id, status).await {
         Ok(_) => {
-            log::info!("[Admin] 评论审核完成 | admin_id={}, comment_id={}", user.id, comment_id);
+            log::info!(
+                "[Admin] 评论审核完成 | admin_id={}, comment_id={}",
+                user.id,
+                comment_id
+            );
             HttpResponse::Ok().json(serde_json::json!({
                 "message": "评论审核完成"
             }))
@@ -304,7 +333,11 @@ async fn send_notification(
     req: web::Json<crate::services::SendNotificationRequest>,
 ) -> impl Responder {
     let user = current_user.into_inner();
-    log::info!("[Admin] 发送系统通知 | admin_id={}, title={}", user.id, req.title);
+    log::info!(
+        "[Admin] 发送系统通知 | admin_id={}, title={}",
+        user.id,
+        req.title
+    );
 
     if let Err(e) = check_admin(&user) {
         return handle_admin_error(e);
@@ -421,7 +454,11 @@ async fn update_teacher(
 ) -> impl Responder {
     let user = current_user.into_inner();
     let sn = path.into_inner();
-    log::info!("[Admin] 更新教师信息 | admin_id={}, teacher_sn={}", user.id, sn);
+    log::info!(
+        "[Admin] 更新教师信息 | admin_id={}, teacher_sn={}",
+        user.id,
+        sn
+    );
 
     if let Err(e) = check_admin(&user) {
         return handle_admin_error(e);
@@ -443,8 +480,12 @@ async fn update_teacher_status(
 ) -> impl Responder {
     let user = current_user.into_inner();
     let sn = path.into_inner();
-    log::info!("[Admin] 更新教师状态 | admin_id={}, teacher_sn={}, is_active={}",
-        user.id, sn, req.is_active);
+    log::info!(
+        "[Admin] 更新教师状态 | admin_id={}, teacher_sn={}, is_active={}",
+        user.id,
+        sn,
+        req.is_active
+    );
 
     if let Err(e) = check_admin(&user) {
         return handle_admin_error(e);
@@ -529,7 +570,11 @@ async fn update_course(
 ) -> impl Responder {
     let user = current_user.into_inner();
     let sn = path.into_inner();
-    log::info!("[Admin] 更新课程信息 | admin_id={}, course_sn={}", user.id, sn);
+    log::info!(
+        "[Admin] 更新课程信息 | admin_id={}, course_sn={}",
+        user.id,
+        sn
+    );
 
     if let Err(e) = check_admin(&user) {
         return handle_admin_error(e);
@@ -551,8 +596,12 @@ async fn update_course_status(
 ) -> impl Responder {
     let user = current_user.into_inner();
     let sn = path.into_inner();
-    log::info!("[Admin] 更新课程状态 | admin_id={}, course_sn={}, is_active={}",
-        user.id, sn, req.is_active);
+    log::info!(
+        "[Admin] 更新课程状态 | admin_id={}, course_sn={}, is_active={}",
+        user.id,
+        sn,
+        req.is_active
+    );
 
     if let Err(e) = check_admin(&user) {
         return handle_admin_error(e);

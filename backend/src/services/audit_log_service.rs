@@ -63,7 +63,7 @@ impl AuditLogService {
                 (user_id, action, target_type, target_id, details, ip_address)
             VALUES
                 ($1, $2, $3, $4, $5, $6::inet)
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(action_str)

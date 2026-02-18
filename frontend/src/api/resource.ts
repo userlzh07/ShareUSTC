@@ -1,5 +1,7 @@
 import request from './request';
 import logger from '../utils/logger';
+import { getOssStatus, getStsToken, resourceUploadCallback } from './oss';
+import { uploadToOssWithSts, uploadToSignedUrl } from '../utils/oss-upload';
 import type {
   ResourceListResponse,
   ResourceListQuery,
@@ -76,6 +78,42 @@ export const uploadResource = async (
   file: File,
   onProgress?: (percent: number) => void
 ): Promise<UploadResourceResponse> => {
+  const ossStatus = await getOssStatus().catch(() => null);
+  if (ossStatus?.storageBackend === 'oss') {
+    const token = await getStsToken({
+      fileType: 'resource',
+      fileName: file.name,
+      fileSize: file.size,
+      contentType: file.type || undefined
+    });
+
+    if (token.uploadMode === 'sts') {
+      await uploadToOssWithSts({
+        endpoint: token.endpoint,
+        region: token.region,
+        bucket: token.bucket,
+        uploadKey: token.uploadKey,
+        accessKeyId: token.accessKeyId,
+        accessKeySecret: token.accessKeySecret,
+        securityToken: token.securityToken,
+        file,
+        onProgress
+      });
+    } else {
+      await uploadToSignedUrl({
+        uploadUrl: token.uploadUrl,
+        file,
+        contentType: file.type || undefined,
+        onProgress
+      });
+    }
+
+    return resourceUploadCallback({
+      ...metadata,
+      ossKey: token.uploadKey
+    });
+  }
+
   const formData = new FormData();
 
   // 添加元数据
@@ -110,78 +148,24 @@ export const deleteResource = async (resourceId: string): Promise<void> => {
 };
 
 /**
- * 从 Content-Disposition 头部解析文件名
- * 支持 RFC 5987 编码的 filename* 格式
- * @param contentDisposition Content-Disposition 头部值
- * @param fallbackName 默认文件名
- * @returns 解析后的文件名
- */
-function parseFilenameFromContentDisposition(
-  contentDisposition: string | null,
-  fallbackName: string
-): string {
-  if (!contentDisposition) {
-    return fallbackName;
-  }
-
-  // 首先尝试解析 RFC 5987 格式的 filename*=UTF-8''xxx
-  const filenameStarMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
-  if (filenameStarMatch && filenameStarMatch[1]) {
-    try {
-      // 解码 percent-encoded 字符串
-      return decodeURIComponent(filenameStarMatch[1]);
-    } catch {
-      // 解码失败，继续尝试其他格式
-    }
-  }
-
-  // 尝试解析标准的 filename="xxx"
-  const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
-  if (filenameMatch && filenameMatch[1]) {
-    return filenameMatch[1];
-  }
-
-  return fallbackName;
-}
-
-/**
  * 下载资源
  * @param resourceId 资源ID
  * @param fileName 文件名
  */
-export const downloadResource = async (resourceId: string, fileName?: string): Promise<void> => {
+export const downloadResource = async (resourceId: string, _fileName?: string): Promise<void> => {
   try {
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
-    // 确保 baseUrl 不以 /api 结尾
     const cleanBaseUrl = baseUrl.replace(/\/api$/, '');
-    const response = await fetch(
-      `${cleanBaseUrl}/api/resources/${resourceId}/download`,
-      {
-        credentials: 'include', // 自动携带 HttpOnly Cookie
-      }
-    );
+    const downloadUrl = `${cleanBaseUrl}/api/resources/${resourceId}/download`;
 
-    if (!response.ok) {
-      throw new Error('下载失败');
-    }
-
-    // 获取文件名
-    const contentDisposition = response.headers.get('content-disposition');
-    const downloadFileName = parseFilenameFromContentDisposition(
-      contentDisposition,
-      fileName || 'download'
-    );
-
-    // 创建下载链接
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
+    // OSS 模式下后端会 302 到跨域预签名 URL。使用浏览器导航下载可避免 fetch 跨域重定向失败。
     const link = document.createElement('a');
-    link.href = url;
-    link.download = downloadFileName;
+    link.href = downloadUrl;
+    link.rel = 'noopener';
+    link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
   } catch (error) {
     logger.error('[Resource]', '下载失败', error);
     throw error;

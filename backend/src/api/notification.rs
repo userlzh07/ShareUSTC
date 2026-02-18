@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::db::AppState;
 use crate::models::{CurrentUser, NotificationListQuery};
 use crate::services::NotificationService;
-use crate::utils::{not_found, internal_error};
+use crate::utils::{internal_error, not_found};
 
 /// 获取通知列表
 #[get("/notifications")]
@@ -97,7 +97,9 @@ pub async fn dismiss_priority_notification(
 ) -> impl Responder {
     let notification_id = path.into_inner();
 
-    match NotificationService::dismiss_priority_notification(&state.pool, notification_id, user.id).await {
+    match NotificationService::dismiss_priority_notification(&state.pool, notification_id, user.id)
+        .await
+    {
         Ok(true) => HttpResponse::NoContent().finish(),
         Ok(false) => not_found("通知不存在或无权访问"),
         Err(e) => {

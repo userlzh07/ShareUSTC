@@ -2,7 +2,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{
-    CreateRatingRequest, Rating, RatingResponse, RatingSummary, ResourceRatingInfo, RatingDimension,
+    CreateRatingRequest, Rating, RatingDimension, RatingResponse, RatingSummary, ResourceRatingInfo,
 };
 use crate::services::NotificationService;
 
@@ -60,27 +60,24 @@ impl RatingService {
     }
 
     /// 评分时通知资源上传者
-    async fn notify_uploader_on_rating(
-        pool: &PgPool,
-        resource_id: Uuid,
-        rater_id: Uuid,
-    ) {
+    async fn notify_uploader_on_rating(pool: &PgPool, resource_id: Uuid, rater_id: Uuid) {
         // 获取资源上传者信息和评分者用户名
         let resource_result = sqlx::query_as::<_, (Uuid, String, Option<Uuid>)>(
-            "SELECT uploader_id, title, author_id FROM resources WHERE id = $1"
+            "SELECT uploader_id, title, author_id FROM resources WHERE id = $1",
         )
         .bind(resource_id)
         .fetch_optional(pool)
         .await;
 
-        let rater_result = sqlx::query_scalar::<_, String>(
-            "SELECT username FROM users WHERE id = $1"
-        )
-        .bind(rater_id)
-        .fetch_optional(pool)
-        .await;
+        let rater_result =
+            sqlx::query_scalar::<_, String>("SELECT username FROM users WHERE id = $1")
+                .bind(rater_id)
+                .fetch_optional(pool)
+                .await;
 
-        if let (Ok(Some((uploader_id, resource_title, author_id))), Ok(Some(rater_name))) = (resource_result, rater_result) {
+        if let (Ok(Some((uploader_id, resource_title, author_id))), Ok(Some(rater_name))) =
+            (resource_result, rater_result)
+        {
             // 优先通知作者（如果存在），否则通知上传者
             let notify_user_id = author_id.unwrap_or(uploader_id);
 
@@ -92,7 +89,9 @@ impl RatingService {
                     &resource_title,
                     notify_user_id,
                     &rater_name,
-                ).await {
+                )
+                .await
+                {
                     log::warn!("[RatingService] 发送评分通知失败: {}", e);
                 }
             }
@@ -106,7 +105,7 @@ impl RatingService {
         user_id: Uuid,
     ) -> Result<Option<RatingResponse>, sqlx::Error> {
         let rating = sqlx::query_as::<_, Rating>(
-            "SELECT * FROM ratings WHERE resource_id = $1 AND user_id = $2"
+            "SELECT * FROM ratings WHERE resource_id = $1 AND user_id = $2",
         )
         .bind(resource_id)
         .bind(user_id)
@@ -122,13 +121,11 @@ impl RatingService {
         resource_id: Uuid,
         user_id: Uuid,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "DELETE FROM ratings WHERE resource_id = $1 AND user_id = $2"
-        )
-        .bind(resource_id)
-        .bind(user_id)
-        .execute(pool)
-        .await?;
+        sqlx::query("DELETE FROM ratings WHERE resource_id = $1 AND user_id = $2")
+            .bind(resource_id)
+            .bind(user_id)
+            .execute(pool)
+            .await?;
 
         // 更新资源统计
         Self::update_resource_stats(pool, resource_id).await?;
@@ -224,10 +221,7 @@ impl RatingService {
     }
 
     /// 更新资源统计表中的评分数据
-    async fn update_resource_stats(
-        pool: &PgPool,
-        resource_id: Uuid,
-    ) -> Result<(), sqlx::Error> {
+    async fn update_resource_stats(pool: &PgPool, resource_id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
             INSERT INTO resource_stats (

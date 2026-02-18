@@ -1,20 +1,22 @@
 use actix_cors::Cors;
-use actix_web::{http::Method, middleware::Logger, get, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{
+    get, http::Method, middleware::Logger, web, App, HttpResponse, HttpServer, Responder,
+};
 use serde::Serialize;
 use uuid::Uuid;
 
-mod config;
 mod api;
-mod models;
-mod utils;
-mod services;
-mod middleware;
+mod config;
 mod db;
+mod middleware;
+mod models;
+mod services;
+mod utils;
 
+use crate::utils::not_found;
 use config::Config;
 use db::AppState;
 use middleware::{JwtAuth, PublicPathRule};
-use crate::utils::not_found;
 
 #[derive(Serialize)]
 struct HelloResponse {
@@ -25,9 +27,8 @@ struct HelloResponse {
 #[get("/api/hello")]
 async fn hello(data: web::Data<AppState>) -> impl Responder {
     // 测试数据库连接
-    let result: Result<(i32,), sqlx::Error> = sqlx::query_as("SELECT 1")
-        .fetch_one(&data.pool)
-        .await;
+    let result: Result<(i32,), sqlx::Error> =
+        sqlx::query_as("SELECT 1").fetch_one(&data.pool).await;
 
     let db_status = match result {
         Ok(_) => "connected",
@@ -50,35 +51,62 @@ async fn health_check() -> impl Responder {
 
 /// 获取图片文件（公开访问）
 #[get("/images/{image_id}")]
-async fn serve_image(
-    data: web::Data<AppState>,
-    path: web::Path<Uuid>,
-) -> impl Responder {
+async fn serve_image(data: web::Data<AppState>, path: web::Path<Uuid>) -> impl Responder {
     let image_id = path.into_inner();
 
     // 从数据库获取图片路径
     match services::ImageService::get_image_path(&data.pool, image_id).await {
         Ok((file_path, mime_type)) => {
-            match tokio::fs::read(&file_path).await {
-                Ok(file_content) => {
-                    // 根据MIME类型设置Content-Type
-                    let content_type = mime_type
-                        .map(|m| m.parse::<mime::Mime>().ok())
-                        .flatten()
-                        .unwrap_or(mime::APPLICATION_OCTET_STREAM);
-
-                    HttpResponse::Ok()
-                        .content_type(content_type)
-                        .body(file_content)
+            match data.storage.backend_type() {
+                services::StorageBackendType::Oss => {
+                    let expires_secs = data.storage.default_signed_url_expiry();
+                    match data.storage.get_file_url(&file_path, expires_secs).await {
+                        Ok(image_url) => HttpResponse::Found()
+                            .insert_header(("Location", image_url))
+                            .finish(),
+                        Err(e) => {
+                            log::warn!(
+                                "[Image] 生成 OSS 图片链接失败 | image_id={}, path={}, error={}",
+                                image_id,
+                                file_path,
+                                e
+                            );
+                            not_found("图片不存在")
+                        }
+                    }
                 }
-                Err(e) => {
-                    log::warn!("[Image] 读取图片文件失败 | image_id={}, path={}, error={}", image_id, file_path, e);
-                    not_found("图片文件不存在")
+                services::StorageBackendType::Local => {
+                    match data.storage.read_file(&file_path).await {
+                        Ok(file_content) => {
+                            // 根据MIME类型设置Content-Type
+                            let content_type = mime_type
+                                .map(|m| m.parse::<mime::Mime>().ok())
+                                .flatten()
+                                .unwrap_or(mime::APPLICATION_OCTET_STREAM);
+
+                            HttpResponse::Ok()
+                                .content_type(content_type)
+                                .body(file_content)
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "[Image] 读取图片文件失败 | image_id={}, path={}, error={}",
+                                image_id,
+                                file_path,
+                                e
+                            );
+                            not_found("图片文件不存在")
+                        }
+                    }
                 }
             }
         }
         Err(e) => {
-            log::warn!("[Image] 获取图片路径失败 | image_id={}, error={}", image_id, e);
+            log::warn!(
+                "[Image] 获取图片路径失败 | image_id={}, error={}",
+                image_id,
+                e
+            );
             not_found("图片不存在")
         }
     }
@@ -93,9 +121,8 @@ async fn main() -> std::io::Result<()> {
     let config = Config::from_env();
 
     // 初始化日志系统
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or(&config.log_level)
-    ).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
+        .init();
 
     // 构建服务器地址
     let server_addr = format!("{}:{}", config.server_host, config.server_port);
@@ -110,8 +137,14 @@ async fn main() -> std::io::Result<()> {
 
     log::info!("[System] Starting ShareUSTC backend server...");
     log::info!("[System] Server address: http://{}", server_addr);
-    log::info!("[System] Image upload directory: {}", config.image_upload_path);
-    log::info!("[System] Resource upload directory: {}", config.resource_upload_path);
+    log::info!(
+        "[System] Image upload directory: {}",
+        config.image_upload_path
+    );
+    log::info!(
+        "[System] Resource upload directory: {}",
+        config.resource_upload_path
+    );
 
     // 创建数据库连接池
     let pool = match db::create_pool(&config.database_url).await {
@@ -122,17 +155,26 @@ async fn main() -> std::io::Result<()> {
         Err(e) => {
             log::error!("[System] 数据库连接失败 | error={}", e);
             log::warn!("[System] 请检查 DATABASE_URL 环境变量是否正确设置");
-            log::warn!("[System] 示例: DATABASE_URL=postgres://username:password@localhost:5432/shareustc");
+            log::warn!(
+                "[System] 示例: DATABASE_URL=postgres://username:password@localhost:5432/shareustc"
+            );
             std::process::exit(1);
         }
     };
 
     // 同步管理员权限（根据环境变量配置）
     if !config.admin_usernames.is_empty() {
-        log::info!("[Admin] 正在同步管理员权限 | admins={:?}", config.admin_usernames);
+        log::info!(
+            "[Admin] 正在同步管理员权限 | admins={:?}",
+            config.admin_usernames
+        );
         match services::AdminService::sync_admin_roles(&pool, &config.admin_usernames).await {
             Ok((granted, revoked)) => {
-                log::info!("[Admin] 管理员权限同步完成 | granted={}, revoked={}", granted, revoked);
+                log::info!(
+                    "[Admin] 管理员权限同步完成 | granted={}, revoked={}",
+                    granted,
+                    revoked
+                );
             }
             Err(e) => {
                 log::warn!("[Admin] 管理员权限同步失败 | error={}", e);
@@ -157,11 +199,25 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
+    // 初始化存储后端
+    let storage = match services::create_storage_backend(&config) {
+        Ok(storage) => storage,
+        Err(e) => {
+            log::error!("[System] 初始化存储后端失败 | error={}", e);
+            std::process::exit(1);
+        }
+    };
+    log::info!(
+        "[System] Storage backend: {}",
+        storage.backend_type().as_str()
+    );
+
     // 创建应用状态
     let app_state = web::Data::new(AppState::new(
         pool,
         config.jwt_secret.clone(),
         config.cookie_secure,
+        storage,
     ));
 
     log::info!("[System] Server starting at http://{}", server_addr);
@@ -244,7 +300,7 @@ async fn main() -> std::io::Result<()> {
                 let origin_str = origin.to_str().unwrap_or("");
                 cors_origins_worker.iter().any(|allowed| {
                     if allowed.ends_with('/') {
-                        origin_str.starts_with(&allowed[..allowed.len()-1])
+                        origin_str.starts_with(&allowed[..allowed.len() - 1])
                     } else {
                         origin_str == allowed || origin_str.starts_with(&format!("{}/", allowed))
                     }
@@ -255,8 +311,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(app_state.clone())
             .wrap(cors)
-            .wrap(Logger::new("%a %r %s %b %Dms")
-                .log_target("backend::access"))
+            .wrap(Logger::new("%a %r %s %b %Dms").log_target("backend::access"))
             // API 路由（统一使用 /api 前缀，通过中间件控制认证）
             // 注意：config 必须在 config_public 之前注册，否则 /resources/my 会被 /resources/{id} 匹配
             .service(
@@ -264,36 +319,35 @@ async fn main() -> std::io::Result<()> {
                     .wrap(jwt_auth)
                     .configure(api::auth::config)
                     .configure(api::user::config)
+                    .configure(api::oss::config)
                     .configure(api::image_host::config)
-                    .configure(api::comment::config)          // 评论路由
-                    .configure(api::notification::config)     // 通知路由
-                    .configure(api::admin::config)            // 管理后台路由
-                    .configure(api::favorite::config)         // 收藏夹路由
-                    .configure(api::teacher::config)          // 教师路由（公开）
-                    .configure(api::course::config)           // 课程路由（公开）
-                    .configure(api::resource::config)          // 需要认证的资源路由（先注册）
-                    .configure(api::resource::config_public)  // 公开资源路由（后注册）
+                    .configure(api::comment::config) // 评论路由
+                    .configure(api::notification::config) // 通知路由
+                    .configure(api::admin::config) // 管理后台路由
+                    .configure(api::favorite::config) // 收藏夹路由
+                    .configure(api::teacher::config) // 教师路由（公开）
+                    .configure(api::course::config) // 课程路由（公开）
+                    .configure(api::resource::config) // 需要认证的资源路由（先注册）
+                    .configure(api::resource::config_public), // 公开资源路由（后注册）
             )
             // 独立的公开服务（非 /api 前缀）
             .service(serve_image)
             .service(health_check)
             .service(hello)
     })
-        .bind(&server_addr)?
-        .run()
-        .await
+    .bind(&server_addr)?
+    .run()
+    .await
 }
 
 /// 初始化用户 sn
 /// 为没有 sn 的用户按创建时间顺序分配 sn
 async fn initialize_user_sn(pool: &sqlx::PgPool) -> Result<usize, sqlx::Error> {
     // 确保序列存在（从1开始）
-    sqlx::query(
-        "CREATE SEQUENCE IF NOT EXISTS user_sn_seq START 1"
-    )
-    .execute(pool)
-    .await
-    .ok();
+    sqlx::query("CREATE SEQUENCE IF NOT EXISTS user_sn_seq START 1")
+        .execute(pool)
+        .await
+        .ok();
 
     // 获取当前最大的 sn 值
     let max_sn: Option<i64> = sqlx::query_scalar("SELECT MAX(sn) FROM users")
@@ -310,11 +364,10 @@ async fn initialize_user_sn(pool: &sqlx::PgPool) -> Result<usize, sqlx::Error> {
     }
 
     // 获取没有 sn 的用户列表
-    let rows: Vec<(uuid::Uuid,)> = sqlx::query_as(
-        "SELECT id FROM users WHERE sn IS NULL ORDER BY created_at ASC"
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<(uuid::Uuid,)> =
+        sqlx::query_as("SELECT id FROM users WHERE sn IS NULL ORDER BY created_at ASC")
+            .fetch_all(pool)
+            .await?;
 
     let count = rows.len();
     if count == 0 {
@@ -325,7 +378,7 @@ async fn initialize_user_sn(pool: &sqlx::PgPool) -> Result<usize, sqlx::Error> {
     let mut assigned = 0;
     for (user_id,) in rows {
         let result = sqlx::query(
-            "UPDATE users SET sn = nextval('user_sn_seq') WHERE id = $1 AND sn IS NULL"
+            "UPDATE users SET sn = nextval('user_sn_seq') WHERE id = $1 AND sn IS NULL",
         )
         .bind(user_id)
         .execute(pool)

@@ -148,7 +148,11 @@ impl RegisterRequest {
         if self.username.len() < 3 || self.username.len() > 50 {
             return Err("用户名长度必须在3-50个字符之间".to_string());
         }
-        if !self.username.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        if !self
+            .username
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_')
+        {
             return Err("用户名只能包含字母、数字和下划线".to_string());
         }
 

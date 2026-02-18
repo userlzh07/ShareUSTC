@@ -4,8 +4,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{
-    CreateTeacherRequest, Teacher, TeacherListQuery, TeacherListResponse,
-    UpdateTeacherRequest, UpdateTeacherStatusRequest,
+    CreateTeacherRequest, Teacher, TeacherListQuery, TeacherListResponse, UpdateTeacherRequest,
+    UpdateTeacherStatusRequest,
 };
 
 /// 教师服务错误类型

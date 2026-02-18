@@ -211,8 +211,8 @@ mod tests {
         let role = UserRole::User;
 
         // 生成Access Token
-        let access_token =
-            generate_access_token(user_id, username, role, false, TEST_SECRET).expect("生成Token失败");
+        let access_token = generate_access_token(user_id, username, role, false, TEST_SECRET)
+            .expect("生成Token失败");
 
         // 尝试用refresh类型验证access token
         let result = verify_token(&access_token, TEST_SECRET, Some("refresh"));

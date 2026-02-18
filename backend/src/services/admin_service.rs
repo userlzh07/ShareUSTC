@@ -134,8 +134,12 @@ impl AdminService {
     /// 根据环境变量 ADMIN_USERNAMES 的配置，同步数据库中的管理员权限：
     /// 1. 配置文件中存在的用户 -> 赋予管理员权限
     /// 2. 配置文件中不存在的用户（但数据库中是管理员）-> 取消管理员权限
-    pub async fn sync_admin_roles(pool: &PgPool, admin_usernames: &[String]) -> Result<(usize, usize), AdminError> {
-        let admin_set: std::collections::HashSet<&str> = admin_usernames.iter().map(|s| s.as_str()).collect();
+    pub async fn sync_admin_roles(
+        pool: &PgPool,
+        admin_usernames: &[String],
+    ) -> Result<(usize, usize), AdminError> {
+        let admin_set: std::collections::HashSet<&str> =
+            admin_usernames.iter().map(|s| s.as_str()).collect();
 
         // 1. 将配置中的管理员用户设置为 admin
         let mut granted_count = 0usize;
@@ -158,17 +162,18 @@ impl AdminService {
         }
 
         // 2. 获取所有当前是 admin 的用户
-        let current_admins: Vec<(String,)> = sqlx::query_as("SELECT username FROM users WHERE role = 'admin'")
-            .fetch_all(pool)
-            .await
-            .map_err(|e| AdminError::DatabaseError(format!("查询当前管理员失败: {}", e)))?;
+        let current_admins: Vec<(String,)> =
+            sqlx::query_as("SELECT username FROM users WHERE role = 'admin'")
+                .fetch_all(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(format!("查询当前管理员失败: {}", e)))?;
 
         // 3. 取消不在配置中的管理员权限
         let mut revoked_count = 0usize;
         for (username,) in current_admins {
             if !admin_set.contains(username.as_str()) {
                 let result = sqlx::query(
-                    "UPDATE users SET role = 'user', updated_at = NOW() WHERE username = $1"
+                    "UPDATE users SET role = 'user', updated_at = NOW() WHERE username = $1",
                 )
                 .bind(&username)
                 .execute(pool)
@@ -182,7 +187,11 @@ impl AdminService {
             }
         }
 
-        log::info!("管理员权限同步完成: 赋予 {} 个, 取消 {} 个", granted_count, revoked_count);
+        log::info!(
+            "管理员权限同步完成: 赋予 {} 个, 取消 {} 个",
+            granted_count,
+            revoked_count
+        );
         Ok((granted_count, revoked_count))
     }
 }
@@ -191,10 +200,11 @@ impl AdminService {
     /// 获取仪表盘统计数据
     pub async fn get_dashboard_stats(pool: &PgPool) -> Result<DashboardStats, AdminError> {
         // 用户总数
-        let total_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_active = true")
-            .fetch_one(pool)
-            .await
-            .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let total_users: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_active = true")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         // 资源总数
         let total_resources: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM resources")
@@ -209,32 +219,29 @@ impl AdminService {
             .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         // 待审核资源数
-        let pending_resources: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM resources WHERE audit_status = 'pending'"
-        )
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let pending_resources: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM resources WHERE audit_status = 'pending'")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         // 待审核评论数
-        let pending_comments: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM comments WHERE audit_status = 'pending'"
-        )
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let pending_comments: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM comments WHERE audit_status = 'pending'")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         // 今日新增用户
-        let today_new_users: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE DATE(created_at) = CURRENT_DATE"
-        )
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let today_new_users: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE DATE(created_at) = CURRENT_DATE")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         // 今日新增资源
         let today_new_resources: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM resources WHERE DATE(created_at) = CURRENT_DATE"
+            "SELECT COUNT(*) FROM resources WHERE DATE(created_at) = CURRENT_DATE",
         )
         .fetch_one(pool)
         .await
@@ -274,7 +281,7 @@ impl AdminService {
             FROM users u
             ORDER BY u.created_at DESC
             LIMIT $1 OFFSET $2
-            "#
+            "#,
         )
         .bind(per_page as i64)
         .bind(offset as i64)
@@ -302,14 +309,13 @@ impl AdminService {
         user_id: Uuid,
         is_active: bool,
     ) -> Result<(), AdminError> {
-        let result = sqlx::query(
-            "UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2"
-        )
-        .bind(is_active)
-        .bind(user_id)
-        .execute(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let result =
+            sqlx::query("UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2")
+                .bind(is_active)
+                .bind(user_id)
+                .execute(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         if result.rows_affected() == 0 {
             return Err(AdminError::NotFound("用户不存在".to_string()));
@@ -344,7 +350,7 @@ impl AdminService {
             WHERE r.audit_status = 'pending'
             ORDER BY r.created_at DESC
             LIMIT $1 OFFSET $2
-            "#
+            "#,
         )
         .bind(per_page as i64)
         .bind(offset as i64)
@@ -353,12 +359,11 @@ impl AdminService {
         .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         // 获取总数
-        let total: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM resources WHERE audit_status = 'pending'"
-        )
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM resources WHERE audit_status = 'pending'")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         Ok(PendingResourceListResponse {
             resources,
@@ -378,7 +383,7 @@ impl AdminService {
         // 验证状态值
         if status != "approved" && status != "rejected" {
             return Err(AdminError::ValidationError(
-                "状态必须是 approved 或 rejected".to_string()
+                "状态必须是 approved 或 rejected".to_string(),
             ));
         }
 
@@ -389,7 +394,7 @@ impl AdminService {
                 ai_reject_reason = $2,
                 updated_at = NOW()
             WHERE id = $3
-            "#
+            "#,
         )
         .bind(&status)
         .bind(reason)
@@ -430,12 +435,10 @@ impl AdminService {
             JOIN users u ON c.user_id = u.id
             JOIN resources r ON c.resource_id = r.id
             WHERE 1=1
-            "#
+            "#,
         );
 
-        let mut count_query = String::from(
-            "SELECT COUNT(*) FROM comments c WHERE 1=1"
-        );
+        let mut count_query = String::from("SELECT COUNT(*) FROM comments c WHERE 1=1");
 
         // 添加审核状态筛选
         if let Some(ref _status) = audit_status {
@@ -486,10 +489,7 @@ impl AdminService {
     }
 
     /// 删除评论
-    pub async fn delete_comment(
-        pool: &PgPool,
-        comment_id: Uuid,
-    ) -> Result<(), AdminError> {
+    pub async fn delete_comment(pool: &PgPool, comment_id: Uuid) -> Result<(), AdminError> {
         let result = sqlx::query("DELETE FROM comments WHERE id = $1")
             .bind(comment_id)
             .execute(pool)
@@ -512,18 +512,16 @@ impl AdminService {
     ) -> Result<(), AdminError> {
         if status != "approved" && status != "rejected" {
             return Err(AdminError::ValidationError(
-                "状态必须是 approved 或 rejected".to_string()
+                "状态必须是 approved 或 rejected".to_string(),
             ));
         }
 
-        let result = sqlx::query(
-            "UPDATE comments SET audit_status = $1 WHERE id = $2"
-        )
-        .bind(&status)
-        .bind(comment_id)
-        .execute(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let result = sqlx::query("UPDATE comments SET audit_status = $1 WHERE id = $2")
+            .bind(&status)
+            .bind(comment_id)
+            .execute(pool)
+            .await
+            .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         if result.rows_affected() == 0 {
             return Err(AdminError::NotFound("评论不存在".to_string()));
@@ -557,7 +555,7 @@ impl AdminService {
                         (recipient_id, title, content, notification_type, priority, link_url)
                     VALUES
                         (NULL, $1, $2, $3, $4, $5)
-                    "#
+                    "#,
                 )
                 .bind(&request.title)
                 .bind(&request.content)
@@ -570,13 +568,12 @@ impl AdminService {
             }
             NotificationTarget::Specific(user_id) => {
                 // 检查用户是否存在
-                let user_exists: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)"
-                )
-                .bind(user_id)
-                .fetch_one(pool)
-                .await
-                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+                let user_exists: bool =
+                    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+                        .bind(user_id)
+                        .fetch_one(pool)
+                        .await
+                        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
                 if !user_exists {
                     return Err(AdminError::NotFound("指定用户不存在".to_string()));
@@ -589,7 +586,7 @@ impl AdminService {
                         (recipient_id, title, content, notification_type, priority, link_url)
                     VALUES
                         ($1, $2, $3, $4, $5, $6)
-                    "#
+                    "#,
                 )
                 .bind(user_id)
                 .bind(&request.title)
@@ -603,34 +600,38 @@ impl AdminService {
             }
         }
 
-        log::info!("通知发送成功: target={:?}, type={}", request.target, request.notification_type);
+        log::info!(
+            "通知发送成功: target={:?}, type={}",
+            request.target,
+            request.notification_type
+        );
         Ok(())
     }
 
     /// 获取详细统计数据
     pub async fn get_detailed_stats(pool: &PgPool) -> Result<DetailedStats, AdminError> {
         // 用户统计
-        let total_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_active = true")
-            .fetch_one(pool)
-            .await
-            .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let total_users: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_active = true")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
-        let new_users_today: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE DATE(created_at) = CURRENT_DATE"
-        )
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let new_users_today: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE DATE(created_at) = CURRENT_DATE")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         let new_users_week: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'"
+            "SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'",
         )
         .fetch_one(pool)
         .await
         .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         let new_users_month: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'"
+            "SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'",
         )
         .fetch_one(pool)
         .await
@@ -642,26 +643,23 @@ impl AdminService {
             .await
             .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
-        let pending_resources: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM resources WHERE audit_status = 'pending'"
-        )
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let pending_resources: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM resources WHERE audit_status = 'pending'")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
-        let approved_resources: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM resources WHERE audit_status = 'approved'"
-        )
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let approved_resources: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM resources WHERE audit_status = 'approved'")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
-        let rejected_resources: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM resources WHERE audit_status = 'rejected'"
-        )
-        .fetch_one(pool)
-        .await
-        .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
+        let rejected_resources: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM resources WHERE audit_status = 'rejected'")
+                .fetch_one(pool)
+                .await
+                .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         // 资源类型分布
         let resource_type_distribution: Vec<ResourceTypeStat> = sqlx::query_as(
@@ -670,7 +668,7 @@ impl AdminService {
             FROM resources
             GROUP BY resource_type
             ORDER BY count DESC
-            "#
+            "#,
         )
         .fetch_all(pool)
         .await
@@ -683,7 +681,7 @@ impl AdminService {
             .map_err(|e| AdminError::DatabaseError(e.to_string()))?;
 
         let downloads_today: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM download_logs WHERE DATE(downloaded_at) = CURRENT_DATE"
+            "SELECT COUNT(*) FROM download_logs WHERE DATE(downloaded_at) = CURRENT_DATE",
         )
         .fetch_one(pool)
         .await
@@ -708,7 +706,7 @@ impl AdminService {
             GROUP BY r.id, r.title
             ORDER BY download_count DESC
             LIMIT 10
-            "#
+            "#,
         )
         .fetch_all(pool)
         .await
@@ -800,7 +798,7 @@ impl AdminService {
                             SELECT COUNT(*) FROM audit_logs
                             WHERE action = $1 AND user_id = $2
                                 AND created_at >= $3 AND created_at <= $4
-                            "#
+                            "#,
                         )
                         .bind(action)
                         .bind(user_id)
@@ -814,7 +812,7 @@ impl AdminService {
                             r#"
                             SELECT COUNT(*) FROM audit_logs
                             WHERE action = $1 AND user_id = $2 AND created_at >= $3
-                            "#
+                            "#,
                         )
                         .bind(action)
                         .bind(user_id)
@@ -828,7 +826,7 @@ impl AdminService {
                         r#"
                         SELECT COUNT(*) FROM audit_logs
                         WHERE action = $1 AND user_id = $2 AND created_at <= $3
-                        "#
+                        "#,
                     )
                     .bind(action)
                     .bind(user_id)
@@ -838,7 +836,7 @@ impl AdminService {
                 } else {
                     // action + user_id
                     sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM audit_logs WHERE action = $1 AND user_id = $2"
+                        "SELECT COUNT(*) FROM audit_logs WHERE action = $1 AND user_id = $2",
                     )
                     .bind(action)
                     .bind(user_id)
@@ -852,7 +850,7 @@ impl AdminService {
                         r#"
                         SELECT COUNT(*) FROM audit_logs
                         WHERE action = $1 AND created_at >= $2 AND created_at <= $3
-                        "#
+                        "#,
                     )
                     .bind(action)
                     .bind(start_date)
@@ -862,7 +860,7 @@ impl AdminService {
                 } else {
                     // action + start_date
                     sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM audit_logs WHERE action = $1 AND created_at >= $2"
+                        "SELECT COUNT(*) FROM audit_logs WHERE action = $1 AND created_at >= $2",
                     )
                     .bind(action)
                     .bind(start_date)
@@ -872,7 +870,7 @@ impl AdminService {
             } else if let Some(ref end_date) = query.end_date {
                 // action + end_date
                 sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM audit_logs WHERE action = $1 AND created_at <= $2"
+                    "SELECT COUNT(*) FROM audit_logs WHERE action = $1 AND created_at <= $2",
                 )
                 .bind(action)
                 .bind(end_date)
@@ -893,7 +891,7 @@ impl AdminService {
                         r#"
                         SELECT COUNT(*) FROM audit_logs
                         WHERE user_id = $1 AND created_at >= $2 AND created_at <= $3
-                        "#
+                        "#,
                     )
                     .bind(user_id)
                     .bind(start_date)
@@ -903,7 +901,7 @@ impl AdminService {
                 } else {
                     // user_id + start_date
                     sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM audit_logs WHERE user_id = $1 AND created_at >= $2"
+                        "SELECT COUNT(*) FROM audit_logs WHERE user_id = $1 AND created_at >= $2",
                     )
                     .bind(user_id)
                     .bind(start_date)
@@ -913,7 +911,7 @@ impl AdminService {
             } else if let Some(ref end_date) = query.end_date {
                 // user_id + end_date
                 sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM audit_logs WHERE user_id = $1 AND created_at <= $2"
+                    "SELECT COUNT(*) FROM audit_logs WHERE user_id = $1 AND created_at <= $2",
                 )
                 .bind(user_id)
                 .bind(end_date)
@@ -930,7 +928,7 @@ impl AdminService {
             if let Some(ref end_date) = query.end_date {
                 // start_date + end_date
                 sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM audit_logs WHERE created_at >= $1 AND created_at <= $2"
+                    "SELECT COUNT(*) FROM audit_logs WHERE created_at >= $1 AND created_at <= $2",
                 )
                 .bind(start_date)
                 .bind(end_date)
@@ -975,11 +973,16 @@ impl AdminService {
                                 AND al.created_at >= $3 AND al.created_at <= $4
                             ORDER BY al.created_at DESC
                             LIMIT $5 OFFSET $6
-                            "#
+                            "#,
                         )
-                        .bind(action).bind(user_id).bind(start_date).bind(end_date)
-                        .bind(per_page as i64).bind(offset as i64)
-                        .fetch_all(pool).await
+                        .bind(action)
+                        .bind(user_id)
+                        .bind(start_date)
+                        .bind(end_date)
+                        .bind(per_page as i64)
+                        .bind(offset as i64)
+                        .fetch_all(pool)
+                        .await
                     } else {
                         // action + user_id + start_date
                         sqlx::query_as(
@@ -993,11 +996,15 @@ impl AdminService {
                             WHERE al.action = $1 AND al.user_id = $2 AND al.created_at >= $3
                             ORDER BY al.created_at DESC
                             LIMIT $4 OFFSET $5
-                            "#
+                            "#,
                         )
-                        .bind(action).bind(user_id).bind(start_date)
-                        .bind(per_page as i64).bind(offset as i64)
-                        .fetch_all(pool).await
+                        .bind(action)
+                        .bind(user_id)
+                        .bind(start_date)
+                        .bind(per_page as i64)
+                        .bind(offset as i64)
+                        .fetch_all(pool)
+                        .await
                     }
                 } else if let Some(ref end_date) = query.end_date {
                     // action + user_id + end_date
@@ -1012,11 +1019,15 @@ impl AdminService {
                         WHERE al.action = $1 AND al.user_id = $2 AND al.created_at <= $3
                         ORDER BY al.created_at DESC
                         LIMIT $4 OFFSET $5
-                        "#
+                        "#,
                     )
-                    .bind(action).bind(user_id).bind(end_date)
-                    .bind(per_page as i64).bind(offset as i64)
-                    .fetch_all(pool).await
+                    .bind(action)
+                    .bind(user_id)
+                    .bind(end_date)
+                    .bind(per_page as i64)
+                    .bind(offset as i64)
+                    .fetch_all(pool)
+                    .await
                 } else {
                     // action + user_id
                     sqlx::query_as(
@@ -1030,11 +1041,14 @@ impl AdminService {
                         WHERE al.action = $1 AND al.user_id = $2
                         ORDER BY al.created_at DESC
                         LIMIT $3 OFFSET $4
-                        "#
+                        "#,
                     )
-                    .bind(action).bind(user_id)
-                    .bind(per_page as i64).bind(offset as i64)
-                    .fetch_all(pool).await
+                    .bind(action)
+                    .bind(user_id)
+                    .bind(per_page as i64)
+                    .bind(offset as i64)
+                    .fetch_all(pool)
+                    .await
                 }
             } else if let Some(ref start_date) = query.start_date {
                 if let Some(ref end_date) = query.end_date {
@@ -1050,11 +1064,15 @@ impl AdminService {
                         WHERE al.action = $1 AND al.created_at >= $2 AND al.created_at <= $3
                         ORDER BY al.created_at DESC
                         LIMIT $4 OFFSET $5
-                        "#
+                        "#,
                     )
-                    .bind(action).bind(start_date).bind(end_date)
-                    .bind(per_page as i64).bind(offset as i64)
-                    .fetch_all(pool).await
+                    .bind(action)
+                    .bind(start_date)
+                    .bind(end_date)
+                    .bind(per_page as i64)
+                    .bind(offset as i64)
+                    .fetch_all(pool)
+                    .await
                 } else {
                     // action + start_date
                     sqlx::query_as(
@@ -1068,11 +1086,14 @@ impl AdminService {
                         WHERE al.action = $1 AND al.created_at >= $2
                         ORDER BY al.created_at DESC
                         LIMIT $3 OFFSET $4
-                        "#
+                        "#,
                     )
-                    .bind(action).bind(start_date)
-                    .bind(per_page as i64).bind(offset as i64)
-                    .fetch_all(pool).await
+                    .bind(action)
+                    .bind(start_date)
+                    .bind(per_page as i64)
+                    .bind(offset as i64)
+                    .fetch_all(pool)
+                    .await
                 }
             } else if let Some(ref end_date) = query.end_date {
                 // action + end_date
@@ -1087,11 +1108,14 @@ impl AdminService {
                     WHERE al.action = $1 AND al.created_at <= $2
                     ORDER BY al.created_at DESC
                     LIMIT $3 OFFSET $4
-                    "#
+                    "#,
                 )
-                .bind(action).bind(end_date)
-                .bind(per_page as i64).bind(offset as i64)
-                .fetch_all(pool).await
+                .bind(action)
+                .bind(end_date)
+                .bind(per_page as i64)
+                .bind(offset as i64)
+                .fetch_all(pool)
+                .await
             } else {
                 // action only
                 sqlx::query_as(
@@ -1105,11 +1129,13 @@ impl AdminService {
                     WHERE al.action = $1
                     ORDER BY al.created_at DESC
                     LIMIT $2 OFFSET $3
-                    "#
+                    "#,
                 )
                 .bind(action)
-                .bind(per_page as i64).bind(offset as i64)
-                .fetch_all(pool).await
+                .bind(per_page as i64)
+                .bind(offset as i64)
+                .fetch_all(pool)
+                .await
             }
         } else if let Some(user_id) = query.user_id {
             if let Some(ref start_date) = query.start_date {
@@ -1126,11 +1152,15 @@ impl AdminService {
                         WHERE al.user_id = $1 AND al.created_at >= $2 AND al.created_at <= $3
                         ORDER BY al.created_at DESC
                         LIMIT $4 OFFSET $5
-                        "#
+                        "#,
                     )
-                    .bind(user_id).bind(start_date).bind(end_date)
-                    .bind(per_page as i64).bind(offset as i64)
-                    .fetch_all(pool).await
+                    .bind(user_id)
+                    .bind(start_date)
+                    .bind(end_date)
+                    .bind(per_page as i64)
+                    .bind(offset as i64)
+                    .fetch_all(pool)
+                    .await
                 } else {
                     // user_id + start_date
                     sqlx::query_as(
@@ -1144,11 +1174,14 @@ impl AdminService {
                         WHERE al.user_id = $1 AND al.created_at >= $2
                         ORDER BY al.created_at DESC
                         LIMIT $3 OFFSET $4
-                        "#
+                        "#,
                     )
-                    .bind(user_id).bind(start_date)
-                    .bind(per_page as i64).bind(offset as i64)
-                    .fetch_all(pool).await
+                    .bind(user_id)
+                    .bind(start_date)
+                    .bind(per_page as i64)
+                    .bind(offset as i64)
+                    .fetch_all(pool)
+                    .await
                 }
             } else if let Some(ref end_date) = query.end_date {
                 // user_id + end_date
@@ -1163,11 +1196,14 @@ impl AdminService {
                     WHERE al.user_id = $1 AND al.created_at <= $2
                     ORDER BY al.created_at DESC
                     LIMIT $3 OFFSET $4
-                    "#
+                    "#,
                 )
-                .bind(user_id).bind(end_date)
-                .bind(per_page as i64).bind(offset as i64)
-                .fetch_all(pool).await
+                .bind(user_id)
+                .bind(end_date)
+                .bind(per_page as i64)
+                .bind(offset as i64)
+                .fetch_all(pool)
+                .await
             } else {
                 // user_id only
                 sqlx::query_as(
@@ -1181,11 +1217,13 @@ impl AdminService {
                         WHERE al.user_id = $1
                     ORDER BY al.created_at DESC
                     LIMIT $2 OFFSET $3
-                    "#
+                    "#,
                 )
                 .bind(user_id)
-                .bind(per_page as i64).bind(offset as i64)
-                .fetch_all(pool).await
+                .bind(per_page as i64)
+                .bind(offset as i64)
+                .fetch_all(pool)
+                .await
             }
         } else if let Some(ref start_date) = query.start_date {
             if let Some(ref end_date) = query.end_date {
@@ -1201,11 +1239,14 @@ impl AdminService {
                     WHERE al.created_at >= $1 AND al.created_at <= $2
                     ORDER BY al.created_at DESC
                     LIMIT $3 OFFSET $4
-                    "#
+                    "#,
                 )
-                .bind(start_date).bind(end_date)
-                .bind(per_page as i64).bind(offset as i64)
-                .fetch_all(pool).await
+                .bind(start_date)
+                .bind(end_date)
+                .bind(per_page as i64)
+                .bind(offset as i64)
+                .fetch_all(pool)
+                .await
             } else {
                 // start_date only
                 sqlx::query_as(
@@ -1219,11 +1260,13 @@ impl AdminService {
                     WHERE al.created_at >= $1
                     ORDER BY al.created_at DESC
                     LIMIT $2 OFFSET $3
-                    "#
+                    "#,
                 )
                 .bind(start_date)
-                .bind(per_page as i64).bind(offset as i64)
-                .fetch_all(pool).await
+                .bind(per_page as i64)
+                .bind(offset as i64)
+                .fetch_all(pool)
+                .await
             }
         } else if let Some(ref end_date) = query.end_date {
             // end_date only
@@ -1238,11 +1281,13 @@ impl AdminService {
                 WHERE al.created_at <= $1
                 ORDER BY al.created_at DESC
                 LIMIT $2 OFFSET $3
-                "#
+                "#,
             )
             .bind(end_date)
-            .bind(per_page as i64).bind(offset as i64)
-            .fetch_all(pool).await
+            .bind(per_page as i64)
+            .bind(offset as i64)
+            .fetch_all(pool)
+            .await
         } else {
             // no filter
             sqlx::query_as(
@@ -1255,15 +1300,18 @@ impl AdminService {
                 LEFT JOIN users u ON al.user_id = u.id
                 ORDER BY al.created_at DESC
                 LIMIT $1 OFFSET $2
-                "#
+                "#,
             )
-            .bind(per_page as i64).bind(offset as i64)
-            .fetch_all(pool).await
+            .bind(per_page as i64)
+            .bind(offset as i64)
+            .fetch_all(pool)
+            .await
         }
         .map_err(|e| AdminError::DatabaseError(format!("查询日志列表失败: {}", e)))?;
 
         // 转换为响应格式（处理日期序列化）
-        let logs: Vec<AuditLogItemResponse> = logs.into_iter().map(AuditLogItemResponse::from).collect();
+        let logs: Vec<AuditLogItemResponse> =
+            logs.into_iter().map(AuditLogItemResponse::from).collect();
 
         Ok(AuditLogListResponse {
             logs,
@@ -1277,7 +1325,7 @@ impl AdminService {
 /// 通知目标枚举
 #[derive(Debug, Clone)]
 pub enum NotificationTarget {
-    All,           // 所有用户
+    All,            // 所有用户
     Specific(Uuid), // 特定用户
 }
 
@@ -1285,7 +1333,7 @@ pub enum NotificationTarget {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendNotificationRequest {
-    pub target: String, // "all" 或 "specific"
+    pub target: String,        // "all" 或 "specific"
     pub user_id: Option<Uuid>, // 当 target 为 specific 时使用
     pub title: String,
     pub content: String,
@@ -1299,12 +1347,15 @@ impl SendNotificationRequest {
     pub fn get_target(&self) -> Result<NotificationTarget, AdminError> {
         match self.target.as_str() {
             "all" => Ok(NotificationTarget::All),
-            "specific" => {
-                self.user_id
-                    .ok_or_else(|| AdminError::ValidationError("指定用户时必须提供 user_id".to_string()))
-                    .map(NotificationTarget::Specific)
-            }
-            _ => Err(AdminError::ValidationError("target 必须是 all 或 specific".to_string())),
+            "specific" => self
+                .user_id
+                .ok_or_else(|| {
+                    AdminError::ValidationError("指定用户时必须提供 user_id".to_string())
+                })
+                .map(NotificationTarget::Specific),
+            _ => Err(AdminError::ValidationError(
+                "target 必须是 all 或 specific".to_string(),
+            )),
         }
     }
 }

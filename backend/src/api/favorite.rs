@@ -6,7 +6,7 @@ use crate::models::{
     AddToFavoriteRequest, CreateFavoriteRequest, CurrentUser, UpdateFavoriteRequest,
 };
 use crate::services::{FavoriteService, ResourceError};
-use crate::utils::{bad_request, forbidden, not_found, internal_error};
+use crate::utils::{bad_request, forbidden, internal_error, not_found};
 
 /// 对文件名进行 RFC 5987 编码，用于支持中文等非 ASCII 字符
 /// 参考: https://datatracker.ietf.org/doc/html/rfc5987
@@ -48,7 +48,10 @@ fn build_content_disposition(filename: &str) -> String {
 
         // 同时提供 filename* 和 filename
         // filename* 优先被现代浏览器使用，能正确显示中文
-        format!("attachment; filename*=UTF-8''{}; filename=\"{}\"", encoded, filename)
+        format!(
+            "attachment; filename*=UTF-8''{}; filename=\"{}\"",
+            encoded, filename
+        )
     }
 }
 
@@ -59,15 +62,27 @@ pub async fn create_favorite(
     user: web::ReqData<CurrentUser>,
     request: web::Json<CreateFavoriteRequest>,
 ) -> impl Responder {
-    log::info!("[Favorite] 创建收藏夹 | user_id={}, name={}", user.id, request.name);
+    log::info!(
+        "[Favorite] 创建收藏夹 | user_id={}, name={}",
+        user.id,
+        request.name
+    );
 
     match FavoriteService::create_favorite(&state.pool, user.id, request.into_inner()).await {
         Ok(response) => {
-            log::info!("[Favorite] 收藏夹创建成功 | favorite_id={}, user_id={}", response.id, user.id);
+            log::info!(
+                "[Favorite] 收藏夹创建成功 | favorite_id={}, user_id={}",
+                response.id,
+                user.id
+            );
             HttpResponse::Created().json(response)
         }
         Err(e) => {
-            log::warn!("[Favorite] 创建收藏夹失败 | user_id={}, error={}", user.id, e);
+            log::warn!(
+                "[Favorite] 创建收藏夹失败 | user_id={}, error={}",
+                user.id,
+                e
+            );
             match e {
                 ResourceError::ValidationError(msg) => bad_request(&msg),
                 ResourceError::NotFound(msg) => not_found(&msg),
@@ -89,7 +104,11 @@ pub async fn get_my_favorites(
     match FavoriteService::get_user_favorites(&state.pool, user.id).await {
         Ok(response) => HttpResponse::Ok().json(response),
         Err(e) => {
-            log::warn!("[Favorite] 获取收藏夹列表失败 | user_id={}, error={}", user.id, e);
+            log::warn!(
+                "[Favorite] 获取收藏夹列表失败 | user_id={}, error={}",
+                user.id,
+                e
+            );
             internal_error("获取收藏夹列表失败")
         }
     }
@@ -104,13 +123,21 @@ pub async fn get_favorite_detail(
 ) -> impl Responder {
     let favorite_id = path.into_inner();
 
-    log::debug!("[Favorite] 获取收藏夹详情 | favorite_id={}, user_id={}", favorite_id, user.id);
+    log::debug!(
+        "[Favorite] 获取收藏夹详情 | favorite_id={}, user_id={}",
+        favorite_id,
+        user.id
+    );
 
     match FavoriteService::get_favorite_detail(&state.pool, favorite_id, user.id).await {
         Ok(response) => HttpResponse::Ok().json(response),
         Err(e) => {
-            log::warn!("[Favorite] 获取收藏夹详情失败 | favorite_id={}, user_id={}, error={}",
-                favorite_id, user.id, e);
+            log::warn!(
+                "[Favorite] 获取收藏夹详情失败 | favorite_id={}, user_id={}, error={}",
+                favorite_id,
+                user.id,
+                e
+            );
             match e {
                 ResourceError::NotFound(msg) => not_found(&msg),
                 ResourceError::Unauthorized(msg) => forbidden(&msg),
@@ -130,16 +157,30 @@ pub async fn update_favorite(
 ) -> impl Responder {
     let favorite_id = path.into_inner();
 
-    log::info!("[Favorite] 更新收藏夹 | favorite_id={}, user_id={}", favorite_id, user.id);
+    log::info!(
+        "[Favorite] 更新收藏夹 | favorite_id={}, user_id={}",
+        favorite_id,
+        user.id
+    );
 
-    match FavoriteService::update_favorite(&state.pool, favorite_id, user.id, request.into_inner()).await {
+    match FavoriteService::update_favorite(&state.pool, favorite_id, user.id, request.into_inner())
+        .await
+    {
         Ok(_) => {
-            log::info!("[Favorite] 收藏夹更新成功 | favorite_id={}, user_id={}", favorite_id, user.id);
+            log::info!(
+                "[Favorite] 收藏夹更新成功 | favorite_id={}, user_id={}",
+                favorite_id,
+                user.id
+            );
             HttpResponse::NoContent().finish()
         }
         Err(e) => {
-            log::warn!("[Favorite] 收藏夹更新失败 | favorite_id={}, user_id={}, error={}",
-                favorite_id, user.id, e);
+            log::warn!(
+                "[Favorite] 收藏夹更新失败 | favorite_id={}, user_id={}, error={}",
+                favorite_id,
+                user.id,
+                e
+            );
             match e {
                 ResourceError::ValidationError(msg) => bad_request(&msg),
                 ResourceError::NotFound(msg) => not_found(&msg),
@@ -159,16 +200,28 @@ pub async fn delete_favorite(
 ) -> impl Responder {
     let favorite_id = path.into_inner();
 
-    log::info!("[Favorite] 删除收藏夹 | favorite_id={}, user_id={}", favorite_id, user.id);
+    log::info!(
+        "[Favorite] 删除收藏夹 | favorite_id={}, user_id={}",
+        favorite_id,
+        user.id
+    );
 
     match FavoriteService::delete_favorite(&state.pool, favorite_id, user.id).await {
         Ok(_) => {
-            log::info!("[Favorite] 收藏夹删除成功 | favorite_id={}, user_id={}", favorite_id, user.id);
+            log::info!(
+                "[Favorite] 收藏夹删除成功 | favorite_id={}, user_id={}",
+                favorite_id,
+                user.id
+            );
             HttpResponse::NoContent().finish()
         }
         Err(e) => {
-            log::warn!("[Favorite] 收藏夹删除失败 | favorite_id={}, user_id={}, error={}",
-                favorite_id, user.id, e);
+            log::warn!(
+                "[Favorite] 收藏夹删除失败 | favorite_id={}, user_id={}, error={}",
+                favorite_id,
+                user.id,
+                e
+            );
             match e {
                 ResourceError::NotFound(msg) => not_found(&msg),
                 ResourceError::Unauthorized(msg) => forbidden(&msg),
@@ -188,18 +241,36 @@ pub async fn add_resource_to_favorite(
 ) -> impl Responder {
     let favorite_id = path.into_inner();
 
-    log::info!("[Favorite] 添加资源到收藏夹 | favorite_id={}, user_id={}, resource_id={}",
-        favorite_id, user.id, request.resource_id);
+    log::info!(
+        "[Favorite] 添加资源到收藏夹 | favorite_id={}, user_id={}, resource_id={}",
+        favorite_id,
+        user.id,
+        request.resource_id
+    );
 
-    match FavoriteService::add_resource_to_favorite(&state.pool, favorite_id, user.id, request.into_inner()).await {
+    match FavoriteService::add_resource_to_favorite(
+        &state.pool,
+        favorite_id,
+        user.id,
+        request.into_inner(),
+    )
+    .await
+    {
         Ok(_) => {
-            log::info!("[Favorite] 资源添加到收藏夹成功 | favorite_id={}, user_id={}",
-                favorite_id, user.id);
+            log::info!(
+                "[Favorite] 资源添加到收藏夹成功 | favorite_id={}, user_id={}",
+                favorite_id,
+                user.id
+            );
             HttpResponse::Created().finish()
         }
         Err(e) => {
-            log::warn!("[Favorite] 添加资源到收藏夹失败 | favorite_id={}, user_id={}, error={}",
-                favorite_id, user.id, e);
+            log::warn!(
+                "[Favorite] 添加资源到收藏夹失败 | favorite_id={}, user_id={}, error={}",
+                favorite_id,
+                user.id,
+                e
+            );
             match e {
                 ResourceError::ValidationError(msg) => bad_request(&msg),
                 ResourceError::NotFound(msg) => not_found(&msg),
@@ -218,13 +289,28 @@ pub async fn remove_resource_from_favorite(
     path: web::Path<(Uuid, Uuid)>,
 ) -> impl Responder {
     let (favorite_id, resource_id) = path.into_inner();
-    log::info!("[Favorite] 从收藏夹移除资源 | favorite_id={}, resource_id={}, user_id={}",
-        favorite_id, resource_id, user.id);
+    log::info!(
+        "[Favorite] 从收藏夹移除资源 | favorite_id={}, resource_id={}, user_id={}",
+        favorite_id,
+        resource_id,
+        user.id
+    );
 
-    match FavoriteService::remove_resource_from_favorite(&state.pool, favorite_id, resource_id, user.id).await {
+    match FavoriteService::remove_resource_from_favorite(
+        &state.pool,
+        favorite_id,
+        resource_id,
+        user.id,
+    )
+    .await
+    {
         Ok(_) => {
-            log::info!("[Favorite] 资源从收藏夹移除成功 | favorite_id={}, resource_id={}, user_id={}",
-                favorite_id, resource_id, user.id);
+            log::info!(
+                "[Favorite] 资源从收藏夹移除成功 | favorite_id={}, resource_id={}, user_id={}",
+                favorite_id,
+                resource_id,
+                user.id
+            );
             HttpResponse::NoContent().finish()
         }
         Err(e) => {
@@ -250,12 +336,10 @@ pub async fn check_resource_in_favorite(
 
     match FavoriteService::check_resource_in_favorites(&state.pool, user.id, resource_id).await {
         Ok(response) => HttpResponse::Ok().json(response),
-        Err(e) => {
-            match e {
-                ResourceError::NotFound(msg) => not_found(&msg),
-                _ => internal_error("检查失败"),
-            }
-        }
+        Err(e) => match e {
+            ResourceError::NotFound(msg) => not_found(&msg),
+            _ => internal_error("检查失败"),
+        },
     }
 }
 
@@ -269,19 +353,28 @@ pub async fn download_favorite(
     let favorite_id = path.into_inner();
 
     // 首先获取收藏夹名称
-    let favorite_name = match FavoriteService::get_favorite_detail(&state.pool, favorite_id, user.id).await {
-        Ok(detail) => detail.name,
-        Err(e) => {
-            return match e {
-                ResourceError::NotFound(msg) => not_found(&msg),
-                ResourceError::Unauthorized(msg) => forbidden(&msg),
-                _ => internal_error("获取收藏夹信息失败"),
-            };
-        }
-    };
+    let favorite_name =
+        match FavoriteService::get_favorite_detail(&state.pool, favorite_id, user.id).await {
+            Ok(detail) => detail.name,
+            Err(e) => {
+                return match e {
+                    ResourceError::NotFound(msg) => not_found(&msg),
+                    ResourceError::Unauthorized(msg) => forbidden(&msg),
+                    _ => internal_error("获取收藏夹信息失败"),
+                };
+            }
+        };
 
     // 打包下载
-    match FavoriteService::pack_favorite_resources(&state.pool, favorite_id, user.id, &favorite_name).await {
+    match FavoriteService::pack_favorite_resources(
+        &state.pool,
+        &state.storage,
+        favorite_id,
+        user.id,
+        &favorite_name,
+    )
+    .await
+    {
         Ok((zip_data, filename)) => {
             // 构建 Content-Disposition 头，支持中文文件名
             let content_disposition = build_content_disposition(&filename);
@@ -291,15 +384,13 @@ pub async fn download_favorite(
                 .append_header(("Content-Disposition", content_disposition))
                 .body(zip_data)
         }
-        Err(e) => {
-            match e {
-                ResourceError::ValidationError(msg) => bad_request(&msg),
-                ResourceError::NotFound(msg) => not_found(&msg),
-                ResourceError::Unauthorized(msg) => forbidden(&msg),
-                ResourceError::FileError(msg) => internal_error(&msg),
-                _ => internal_error("打包下载失败"),
-            }
-        }
+        Err(e) => match e {
+            ResourceError::ValidationError(msg) => bad_request(&msg),
+            ResourceError::NotFound(msg) => not_found(&msg),
+            ResourceError::Unauthorized(msg) => forbidden(&msg),
+            ResourceError::FileError(msg) => internal_error(&msg),
+            _ => internal_error("打包下载失败"),
+        },
     }
 }
 

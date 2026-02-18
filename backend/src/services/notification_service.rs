@@ -210,13 +210,12 @@ impl NotificationService {
         user_id: Uuid,
     ) -> Result<bool, ResourceError> {
         // 先查询通知类型
-        let notification = sqlx::query_as::<_, Notification>(
-            "SELECT * FROM notifications WHERE id = $1"
-        )
-        .bind(notification_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+        let notification =
+            sqlx::query_as::<_, Notification>("SELECT * FROM notifications WHERE id = $1")
+                .bind(notification_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
 
         let notification = match notification {
             Some(n) => n,
@@ -230,14 +229,12 @@ impl NotificationService {
 
         let rows_affected = if notification.recipient_id.is_some() {
             // 定向通知：更新原表的 is_read
-            sqlx::query(
-                "UPDATE notifications SET is_read = TRUE WHERE id = $1"
-            )
-            .bind(notification_id)
-            .execute(pool)
-            .await
-            .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
-            .rows_affected()
+            sqlx::query("UPDATE notifications SET is_read = TRUE WHERE id = $1")
+                .bind(notification_id)
+                .execute(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
+                .rows_affected()
         } else {
             // 群发通知：插入到 notification_reads 表
             sqlx::query(
@@ -245,7 +242,7 @@ impl NotificationService {
                 INSERT INTO notification_reads (notification_id, user_id)
                 VALUES ($1, $2)
                 ON CONFLICT (notification_id, user_id) DO NOTHING
-                "#
+                "#,
             )
             .bind(notification_id)
             .bind(user_id)
@@ -259,10 +256,7 @@ impl NotificationService {
     }
 
     /// 标记所有通知为已读
-    pub async fn mark_all_as_read(
-        pool: &PgPool,
-        user_id: Uuid,
-    ) -> Result<i64, ResourceError> {
+    pub async fn mark_all_as_read(pool: &PgPool, user_id: Uuid) -> Result<i64, ResourceError> {
         // 1. 标记所有定向通知为已读
         let direct_result = sqlx::query(
             r#"
@@ -392,7 +386,7 @@ impl NotificationService {
     ) -> Result<bool, ResourceError> {
         // 先查询通知类型
         let notification = sqlx::query_as::<_, Notification>(
-            "SELECT * FROM notifications WHERE id = $1 AND priority = 'high'"
+            "SELECT * FROM notifications WHERE id = $1 AND priority = 'high'",
         )
         .bind(notification_id)
         .fetch_optional(pool)
@@ -411,14 +405,12 @@ impl NotificationService {
 
         let rows_affected = if notification.recipient_id.is_some() {
             // 定向通知：更新原表的 is_read
-            sqlx::query(
-                "UPDATE notifications SET is_read = TRUE WHERE id = $1"
-            )
-            .bind(notification_id)
-            .execute(pool)
-            .await
-            .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
-            .rows_affected()
+            sqlx::query("UPDATE notifications SET is_read = TRUE WHERE id = $1")
+                .bind(notification_id)
+                .execute(pool)
+                .await
+                .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
+                .rows_affected()
         } else {
             // 群发通知：插入到 notification_reads 表
             sqlx::query(
@@ -426,7 +418,7 @@ impl NotificationService {
                 INSERT INTO notification_reads (notification_id, user_id)
                 VALUES ($1, $2)
                 ON CONFLICT (notification_id, user_id) DO NOTHING
-                "#
+                "#,
             )
             .bind(notification_id)
             .bind(user_id)
@@ -453,7 +445,10 @@ impl NotificationService {
         let request = CreateNotificationRequest {
             recipient_id: Some(uploader_id),
             title: "您的资源收到新评论".to_string(),
-            content: format!("用户 {} 评论了您的资源《{}》", commenter_name, resource_title),
+            content: format!(
+                "用户 {} 评论了您的资源《{}》",
+                commenter_name, resource_title
+            ),
             notification_type: NotificationType::CommentReply,
             priority: NotificationPriority::Normal,
             link_url: Some(format!("/resource/{}", resource_id)),

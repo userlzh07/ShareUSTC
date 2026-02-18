@@ -81,8 +81,8 @@ impl ResourceType {
     /// 获取支持的文件扩展名列表
     pub fn supported_extensions() -> Vec<&'static str> {
         vec![
-            "md", "markdown", "ppt", "pptx", "doc", "docx",
-            "pdf", "txt", "jpeg", "jpg", "png", "zip",
+            "md", "markdown", "ppt", "pptx", "doc", "docx", "pdf", "txt", "jpeg", "jpg", "png",
+            "zip",
         ]
     }
 
@@ -106,9 +106,13 @@ impl ResourceType {
         match self {
             ResourceType::WebMarkdown => "text/markdown",
             ResourceType::Ppt => "application/vnd.ms-powerpoint",
-            ResourceType::Pptx => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ResourceType::Pptx => {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            }
             ResourceType::Doc => "application/msword",
-            ResourceType::Docx => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ResourceType::Docx => {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            }
             ResourceType::Pdf => "application/pdf",
             ResourceType::Txt => "text/plain",
             ResourceType::Jpeg => "image/jpeg",

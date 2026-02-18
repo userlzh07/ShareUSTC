@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::db::AppState;
 use crate::models::{CurrentUser, UserRole};
 use crate::services::{CommentService, ResourceError};
-use crate::utils::{forbidden, not_found, internal_error};
+use crate::utils::{forbidden, internal_error, not_found};
 
 /// 删除评论
 #[delete("/comments/{comment_id}")]

@@ -1,9 +1,14 @@
-use actix_web::{get, put, post, web, HttpResponse, Responder};
-use actix_web::cookie::{Cookie, SameSite, time::Duration as CookieDuration};
 use crate::db::AppState;
-use crate::models::{CurrentUser, UpdateProfileRequest, VerificationRequest, UserRole, UserHomepageQuery};
+use crate::models::{
+    CurrentUser, UpdateProfileRequest, UserHomepageQuery, UserRole, VerificationRequest,
+};
 use crate::services::{UserError, UserService};
-use crate::utils::{generate_access_token, generate_refresh_token, bad_request, forbidden, not_found, internal_error};
+use crate::utils::{
+    bad_request, forbidden, generate_access_token, generate_refresh_token, internal_error,
+    not_found,
+};
+use actix_web::cookie::{time::Duration as CookieDuration, Cookie, SameSite};
+use actix_web::{get, post, put, web, HttpResponse, Responder};
 use uuid::Uuid;
 
 /// Cookie 名称常量
@@ -11,10 +16,15 @@ const ACCESS_TOKEN_COOKIE: &str = "access_token";
 const REFRESH_TOKEN_COOKIE: &str = "refresh_token";
 
 /// 构建 HttpOnly Cookie
-fn build_auth_cookie<'a>(name: &'a str, value: &'a str, max_age_days: i64, secure: bool) -> Cookie<'a> {
+fn build_auth_cookie<'a>(
+    name: &'a str,
+    value: &'a str,
+    max_age_days: i64,
+    secure: bool,
+) -> Cookie<'a> {
     Cookie::build(name, value)
         .http_only(true)
-        .secure(secure)  // 从配置读取，生产环境设为 true (HTTPS)
+        .secure(secure) // 从配置读取，生产环境设为 true (HTTPS)
         .same_site(SameSite::Lax)
         .path("/")
         .max_age(CookieDuration::days(max_age_days))
@@ -31,11 +41,19 @@ pub async fn get_current_user(
 
     match UserService::get_current_user(&state.pool, user.id).await {
         Ok(user_info) => {
-            log::info!("[User] 获取当前用户信息成功 | user_id={}, username={}", user.id, user_info.username);
+            log::info!(
+                "[User] 获取当前用户信息成功 | user_id={}, username={}",
+                user.id,
+                user_info.username
+            );
             HttpResponse::Ok().json(user_info)
         }
         Err(e) => {
-            log::warn!("[User] 获取当前用户信息失败 | user_id={}, error={}", user.id, e);
+            log::warn!(
+                "[User] 获取当前用户信息失败 | user_id={}, error={}",
+                user.id,
+                e
+            );
             match e {
                 UserError::UserNotFound(msg) => not_found(&msg),
                 _ => internal_error("获取用户信息失败"),
@@ -112,7 +130,11 @@ pub async fn verify_user(
             ) {
                 Ok(token) => token,
                 Err(e) => {
-                    log::error!("[Auth] 生成访问令牌失败 | user_id={}, error={}", user_info.id, e);
+                    log::error!(
+                        "[Auth] 生成访问令牌失败 | user_id={}, error={}",
+                        user_info.id,
+                        e
+                    );
                     return internal_error("认证成功但生成令牌失败，请重新登录");
                 }
             };
@@ -126,7 +148,11 @@ pub async fn verify_user(
             ) {
                 Ok(token) => token,
                 Err(e) => {
-                    log::error!("[Auth] 生成刷新令牌失败 | user_id={}, error={}", user_info.id, e);
+                    log::error!(
+                        "[Auth] 生成刷新令牌失败 | user_id={}, error={}",
+                        user_info.id,
+                        e
+                    );
                     return internal_error("认证成功但生成令牌失败，请重新登录");
                 }
             };
@@ -164,10 +190,7 @@ pub async fn verify_user(
 
 /// 获取用户公开资料（公开接口，任何人都可以访问）
 #[get("/users/{user_id}")]
-pub async fn get_user_profile(
-    state: web::Data<AppState>,
-    path: web::Path<Uuid>,
-) -> impl Responder {
+pub async fn get_user_profile(state: web::Data<AppState>, path: web::Path<Uuid>) -> impl Responder {
     let user_id = path.into_inner();
 
     match UserService::get_user_profile(&state.pool, user_id).await {
@@ -209,6 +232,6 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(get_current_user)
         .service(update_profile)
         .service(verify_user)
-        .service(get_user_homepage)  // 必须在 get_user_profile 之前注册
+        .service(get_user_homepage) // 必须在 get_user_profile 之前注册
         .service(get_user_profile);
 }

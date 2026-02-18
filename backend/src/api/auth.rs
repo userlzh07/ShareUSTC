@@ -1,19 +1,24 @@
-use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
-use actix_web::cookie::{Cookie, SameSite, time::Duration as CookieDuration};
 use crate::db::AppState;
 use crate::models::{LoginRequest, RegisterRequest};
-use crate::services::{AuthService, AuditLogService, AuthError};
-use crate::utils::{bad_request, unauthorized, conflict, internal_error};
+use crate::services::{AuditLogService, AuthError, AuthService};
+use crate::utils::{bad_request, conflict, internal_error, unauthorized};
+use actix_web::cookie::{time::Duration as CookieDuration, Cookie, SameSite};
+use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
 
 /// Cookie 名称常量
 const ACCESS_TOKEN_COOKIE: &str = "access_token";
 const REFRESH_TOKEN_COOKIE: &str = "refresh_token";
 
 /// 构建 HttpOnly Cookie
-fn build_auth_cookie<'a>(name: &'a str, value: &'a str, max_age_days: i64, secure: bool) -> Cookie<'a> {
+fn build_auth_cookie<'a>(
+    name: &'a str,
+    value: &'a str,
+    max_age_days: i64,
+    secure: bool,
+) -> Cookie<'a> {
     Cookie::build(name, value)
         .http_only(true)
-        .secure(secure)  // 从配置读取，生产环境设为 true (HTTPS)
+        .secure(secure) // 从配置读取，生产环境设为 true (HTTPS)
         .same_site(SameSite::Lax)
         .path("/")
         .max_age(CookieDuration::days(max_age_days))
@@ -43,12 +48,14 @@ pub async fn register(
 
     match AuthService::register(&state.pool, &state.jwt_secret, req.into_inner()).await {
         Ok(response) => {
-            log::info!("[Auth] 用户注册成功 | user_id={}, username={}", response.user.id, response.user.username);
+            log::info!(
+                "[Auth] 用户注册成功 | user_id={}, username={}",
+                response.user.id,
+                response.user.username
+            );
 
             // 获取 IP 地址
-            let ip_address = http_req
-                .peer_addr()
-                .map(|addr| addr.ip().to_string());
+            let ip_address = http_req.peer_addr().map(|addr| addr.ip().to_string());
 
             // 记录审计日志
             let _ = AuditLogService::log_register(
@@ -56,7 +63,8 @@ pub async fn register(
                 response.user.id,
                 &response.user.username,
                 ip_address.as_deref(),
-            ).await;
+            )
+            .await;
 
             // 设置 HttpOnly Cookies
             let access_cookie = build_auth_cookie(
@@ -101,12 +109,14 @@ pub async fn login(
 
     match AuthService::login(&state.pool, &state.jwt_secret, req.into_inner()).await {
         Ok(response) => {
-            log::info!("[Auth] 用户登录成功 | user_id={}, username={}", response.user.id, response.user.username);
+            log::info!(
+                "[Auth] 用户登录成功 | user_id={}, username={}",
+                response.user.id,
+                response.user.username
+            );
 
             // 获取 IP 地址
-            let ip_address = http_req
-                .peer_addr()
-                .map(|addr| addr.ip().to_string());
+            let ip_address = http_req.peer_addr().map(|addr| addr.ip().to_string());
 
             // 记录审计日志
             let _ = AuditLogService::log_login(
@@ -114,7 +124,8 @@ pub async fn login(
                 response.user.id,
                 &response.user.username,
                 ip_address.as_deref(),
-            ).await;
+            )
+            .await;
 
             // 设置 HttpOnly Cookies
             let access_cookie = build_auth_cookie(
@@ -149,14 +160,12 @@ pub async fn login(
 
 /// 刷新 Token
 #[post("/auth/refresh")]
-pub async fn refresh(
-    state: web::Data<AppState>,
-    req: HttpRequest,
-) -> impl Responder {
+pub async fn refresh(state: web::Data<AppState>, req: HttpRequest) -> impl Responder {
     log::info!("[Auth] Token刷新请求");
 
     // 从 Cookie 中获取 refresh token
-    let refresh_token = req.cookie(REFRESH_TOKEN_COOKIE)
+    let refresh_token = req
+        .cookie(REFRESH_TOKEN_COOKIE)
         .map(|c| c.value().to_string());
 
     if refresh_token.is_none() {
@@ -203,9 +212,7 @@ pub async fn refresh(
 
 /// 登出
 #[post("/auth/logout")]
-pub async fn logout(
-    state: web::Data<AppState>,
-) -> impl Responder {
+pub async fn logout(state: web::Data<AppState>) -> impl Responder {
     log::info!("[Auth] 用户登出");
 
     // 清除 Cookies

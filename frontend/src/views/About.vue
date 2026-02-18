@@ -220,9 +220,12 @@ const fetchRepoStats = async () => {
 // 获取 GitHub 贡献者列表（包含代码行数统计）
 // 该端点可能返回 202 表示正在计算，需要重试
 const fetchContributors = async (retryCount = 0): Promise<void> => {
-  contributorsLoading.value = true;
-  contributorsError.value = false;
-  contributorsComputing.value = false;
+  // 只在首次调用时设置 loading 状态，重试时保持 loading
+  if (retryCount === 0) {
+    contributorsLoading.value = true;
+    contributorsError.value = false;
+    contributorsComputing.value = false;
+  }
   try {
     // 使用 stats/contributors 端点获取详细的代码统计
     // 设置较长的超时时间（30秒）以应对中国访问 GitHub 较慢的情况
@@ -242,6 +245,7 @@ const fetchContributors = async (retryCount = 0): Promise<void> => {
         return fetchContributors(retryCount + 1);
       }
       contributorsError.value = true;
+      contributorsLoading.value = false;
       return;
     }
 
@@ -257,6 +261,7 @@ const fetchContributors = async (retryCount = 0): Promise<void> => {
 
       // 数据处理阶段，显示"计算中"
       contributorsComputing.value = true;
+      contributorsLoading.value = false;
 
       // 使用 nextTick 确保 Vue 完成 DOM 更新，显示"计算中"
       await nextTick();
@@ -298,11 +303,11 @@ const fetchContributors = async (retryCount = 0): Promise<void> => {
       contributorsComputing.value = false;
     } else {
       contributorsError.value = true;
+      contributorsLoading.value = false;
     }
   } catch (err) {
     contributorsError.value = true;
     contributorsComputing.value = false;
-  } finally {
     contributorsLoading.value = false;
   }
 };
