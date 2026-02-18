@@ -363,10 +363,27 @@ impl ResourceService {
             _ => "DESC",
         };
 
+        // 判断是否需要关联表
+        let need_teacher_join = !query.teacher_sns.is_empty();
+        let need_course_join = !query.course_sns.is_empty();
+
         // 使用 QueryBuilder 构建 COUNT 查询
         let mut count_builder = sqlx::QueryBuilder::new(
-            "SELECT COUNT(*) FROM resources r WHERE r.audit_status = 'approved'"
+            "SELECT COUNT(DISTINCT r.id) FROM resources r WHERE r.audit_status = 'approved'"
         );
+
+        // 添加关联表 JOIN
+        if need_teacher_join {
+            count_builder.push(" AND EXISTS (SELECT 1 FROM resource_teachers rt WHERE rt.resource_id = r.id AND rt.teacher_sn = ANY(");
+            count_builder.push_bind(&query.teacher_sns);
+            count_builder.push("))");
+        }
+
+        if need_course_join {
+            count_builder.push(" AND EXISTS (SELECT 1 FROM resource_courses rc WHERE rc.resource_id = r.id AND rc.course_sn = ANY(");
+            count_builder.push_bind(&query.course_sns);
+            count_builder.push("))");
+        }
 
         // 处理资源类型筛选（支持合并类型）
         Self::add_resource_type_condition(&mut count_builder, query.resource_type.as_deref());
@@ -399,6 +416,19 @@ impl ResourceService {
             WHERE r.audit_status = 'approved'
             "#
         );
+
+        // 添加关联表筛选条件
+        if need_teacher_join {
+            list_builder.push(" AND EXISTS (SELECT 1 FROM resource_teachers rt WHERE rt.resource_id = r.id AND rt.teacher_sn = ANY(");
+            list_builder.push_bind(&query.teacher_sns);
+            list_builder.push("))");
+        }
+
+        if need_course_join {
+            list_builder.push(" AND EXISTS (SELECT 1 FROM resource_courses rc WHERE rc.resource_id = r.id AND rc.course_sn = ANY(");
+            list_builder.push_bind(&query.course_sns);
+            list_builder.push("))");
+        }
 
         // 处理资源类型筛选
         Self::add_resource_type_condition(&mut list_builder, query.resource_type.as_deref());
@@ -542,14 +572,31 @@ impl ResourceService {
 
         let search_pattern = format!("%{}%", query.q);
 
+        // 判断是否需要关联表
+        let need_teacher_join = !query.teacher_sns.is_empty();
+        let need_course_join = !query.course_sns.is_empty();
+
         // 使用 QueryBuilder 构建 COUNT 查询
         let mut count_builder = sqlx::QueryBuilder::new(
-            "SELECT COUNT(*) FROM resources r WHERE r.audit_status = 'approved' AND (r.title ILIKE "
+            "SELECT COUNT(DISTINCT r.id) FROM resources r WHERE r.audit_status = 'approved' AND (r.title ILIKE "
         );
         count_builder.push_bind(&search_pattern);
         count_builder.push(" OR r.course_name ILIKE ");
         count_builder.push_bind(&search_pattern);
         count_builder.push(")");
+
+        // 添加关联表筛选条件
+        if need_teacher_join {
+            count_builder.push(" AND EXISTS (SELECT 1 FROM resource_teachers rt WHERE rt.resource_id = r.id AND rt.teacher_sn = ANY(");
+            count_builder.push_bind(&query.teacher_sns);
+            count_builder.push("))");
+        }
+
+        if need_course_join {
+            count_builder.push(" AND EXISTS (SELECT 1 FROM resource_courses rc WHERE rc.resource_id = r.id AND rc.course_sn = ANY(");
+            count_builder.push_bind(&query.course_sns);
+            count_builder.push("))");
+        }
 
         // 处理资源类型筛选（支持合并类型）
         Self::add_resource_type_condition(&mut count_builder, query.resource_type.as_deref());
@@ -586,6 +633,19 @@ impl ResourceService {
         search_builder.push(" OR r.course_name ILIKE ");
         search_builder.push_bind(&search_pattern);
         search_builder.push(")");
+
+        // 添加关联表筛选条件
+        if need_teacher_join {
+            search_builder.push(" AND EXISTS (SELECT 1 FROM resource_teachers rt WHERE rt.resource_id = r.id AND rt.teacher_sn = ANY(");
+            search_builder.push_bind(&query.teacher_sns);
+            search_builder.push("))");
+        }
+
+        if need_course_join {
+            search_builder.push(" AND EXISTS (SELECT 1 FROM resource_courses rc WHERE rc.resource_id = r.id AND rc.course_sn = ANY(");
+            search_builder.push_bind(&query.course_sns);
+            search_builder.push("))");
+        }
 
         // 处理资源类型筛选
         Self::add_resource_type_condition(&mut search_builder, query.resource_type.as_deref());

@@ -6,34 +6,43 @@
     </div>
 
     <div class="about-content">
-      <!-- 平台介绍 -->
-      <section class="section">
-        <h2>平台简介</h2>
-        <p>ShareUSTC 是一个面向USTC学生的学习资源分享平台，旨在促进校内优质学习资源的共享与传承，打造互助性的学习社区。</p>
-        <p>在这里，你可以找到课程笔记、往年试卷、复习提纲、讲义等各类学习资料，也可以分享自己的学习心得，帮助更多同学。</p>
-      </section>
+      <!-- 平台简介与功能特色 -->
+      <div class="intro-features-row">
+        <!-- 平台介绍 -->
+        <section class="section section-left">
+          <h2>平台简介</h2>
+          <p>ShareUSTC 是一个面向USTC学生的学习资源分享平台，旨在促进校内优质学习资源的共享与传承，打造互助性的学习社区。</p>
+          <p>在这里，你可以找到课程笔记、往年试卷、复习提纲、讲义等各类学习资料，也可以分享自己的学习心得，帮助更多同学。</p>
+        </section>
 
-      <!-- 功能特色 -->
-      <section class="section features-section">
-        <h2>功能特色</h2>
-        <div class="features">
-          <div class="feature-card">
-            <el-icon :size="60" color="#409eff"><Upload /></el-icon>
-            <h3>资源分享</h3>
-            <p>上传和下载学习资料，包括笔记、试卷、讲义等各类资源</p>
+        <!-- 功能特色 -->
+        <section class="section section-right features-section">
+          <h2>功能特色</h2>
+          <div class="features">
+            <div class="feature-card">
+              <el-icon :size="32" color="#409eff"><Upload /></el-icon>
+              <div class="feature-text">
+                <h3>资源分享</h3>
+                <p>上传和下载笔记、试卷、讲义等学习资料</p>
+              </div>
+            </div>
+            <div class="feature-card">
+              <el-icon :size="32" color="#67c23a"><Search /></el-icon>
+              <div class="feature-text">
+                <h3>智能搜索</h3>
+                <p>按课程、类型、标签快速筛选所需资源</p>
+              </div>
+            </div>
+            <div class="feature-card">
+              <el-icon :size="32" color="#e6a23c"><Star /></el-icon>
+              <div class="feature-text">
+                <h3>互动评价</h3>
+                <p>评分、评论、收藏，发现优质内容</p>
+              </div>
+            </div>
           </div>
-          <div class="feature-card">
-            <el-icon :size="60" color="#67c23a"><Search /></el-icon>
-            <h3>智能搜索</h3>
-            <p>按课程、类型、标签快速筛选，精准找到所需学习资源</p>
-          </div>
-          <div class="feature-card">
-            <el-icon :size="60" color="#e6a23c"><Star /></el-icon>
-            <h3>互动评价</h3>
-            <p>评分、评论、收藏功能，帮你发现社区内的优质内容</p>
-          </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
       <!-- 技术栈 -->
       <section class="section">
@@ -158,6 +167,41 @@
           （点击复制）。
         </p>
       </section>
+
+      <!-- 更新日志 -->
+      <section class="section changelog-section">
+        <h2>更新日志</h2>
+        <div class="changelog-list">
+          <div class="changelog-item">
+            <div class="changelog-date">2026-02-18</div>
+            <div class="changelog-content">
+              <span class="changelog-tag tag-fix">问题修复</span>
+              <span class="changelog-text">修复服务器部署后图床的 BaseURL 为 localhost 的错误</span>
+            </div>
+          </div>
+          <div class="changelog-item">
+            <div class="changelog-date">2026-02-15</div>
+            <div class="changelog-content">
+              <span class="changelog-tag tag-feature">新增功能</span>
+              <span class="changelog-text">上线资料多维度评分，支持对资源的难度、质量、参考答案质量等5个维度进行评分</span>
+            </div>
+          </div>
+          <div class="changelog-item">
+            <div class="changelog-date">2026-02-13</div>
+            <div class="changelog-content">
+              <span class="changelog-tag tag-improve">功能优化</span>
+              <span class="changelog-text">优化首页设计，显示热门资源</span>
+            </div>
+          </div>
+          <div class="changelog-item">
+            <div class="changelog-date">2026-02-12</div>
+            <div class="changelog-content">
+              <span class="changelog-tag tag-feature">新增功能</span>
+              <span class="changelog-text">上线Markdown在线编辑器，支持图床插入图片</span>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div class="back-home">
@@ -239,9 +283,9 @@ const fetchContributors = async (retryCount = 0): Promise<void> => {
 
     if (response.status === 202) {
       // 数据正在计算中，等待后重试
-      // 每次等待 5 秒，最多重试 20 次（总计最多 100 秒等待）
-      if (retryCount < 20) {
-        await new Promise(resolve => setTimeout(resolve, 5000));
+      // 每次等待 1 秒，最多重试 60 次（总计最多 60 秒等待）
+      if (retryCount < 60) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
         return fetchContributors(retryCount + 1);
       }
       contributorsError.value = true;
@@ -388,7 +432,25 @@ const copyQQGroup = async () => {
 .about-content {
   display: flex;
   flex-direction: column;
-  gap: 40px;
+  gap: 24px;
+}
+
+/* 平台简介与功能特色并排布局 */
+.intro-features-row {
+  display: flex;
+  gap: 20px;
+}
+
+.section-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.section-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .section {
@@ -417,60 +479,76 @@ const copyQQGroup = async () => {
   background: #fff;
 }
 
-.features {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 24px;
-  margin-top: 24px;
-}
-
-.feature-card {
-  padding: 30px;
-  text-align: center;
-  border: 1px solid #ebeef5;
-  border-radius: 12px;
-  background-color: #fcfcfc;
-  transition: all 0.3s ease;
-}
-
-.feature-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  transform: translateY(-4px);
-}
-
-.feature-card h3 {
-  margin: 16px 0 8px;
-  color: #303133;
-  font-size: 18px;
-}
-
-.feature-card p {
-  color: #606266;
-  font-size: 14px;
-  margin: 0;
-}
-
-/* 技术栈 */
-.tech-section {
+.features-section .features {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.features-section .feature-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background-color: #fcfcfc;
+  transition: all 0.3s ease;
+  text-align: left;
+}
+
+.features-section .feature-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.features-section .feature-text {
+  flex: 1;
+}
+
+.features-section .feature-card h3 {
+  margin: 0 0 4px;
+  color: #303133;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.features-section .feature-card p {
+  color: #606266;
+  font-size: 13px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* 技术栈 - 紧凑布局 */
+.tech-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+}
+
+.tech-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .tech-group h3 {
-  font-size: 16px;
+  font-size: 14px;
   color: #606266;
-  margin: 0 0 12px 0;
+  margin: 0;
+  min-width: 50px;
 }
 
 .tech-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .tech-tag {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 /* 开源项目区域 */
@@ -733,6 +811,71 @@ const copyQQGroup = async () => {
   white-space: nowrap;
 }
 
+/* 更新日志 */
+.changelog-section {
+  background: #fff;
+}
+
+.changelog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.changelog-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #f6f8fa;
+  border-radius: 8px;
+  border-left: 3px solid #409eff;
+}
+
+.changelog-date {
+  font-size: 14px;
+  color: #909399;
+  font-weight: 800;
+  min-width: 70px;
+  flex-shrink: 0;
+}
+
+.changelog-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.changelog-tag {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.tag-feature {
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.tag-improve {
+  background: #f0f9eb;
+  color: #67c23a;
+}
+
+.tag-fix {
+  background: #fef0f0;
+  color: #f56c6c;
+}
+
+.changelog-text {
+  font-size: 14px;
+  color: #303133;
+  line-height: 1.6;
+}
+
 /* QQ 群号 */
 .qq-group {
   color: #409eff;
@@ -782,8 +925,22 @@ const copyQQGroup = async () => {
     padding: 24px 16px;
   }
 
-  .features {
-    grid-template-columns: 1fr;
+  /* 移动端：平台简介与功能特色垂直排列 */
+  .intro-features-row {
+    flex-direction: column;
+  }
+
+  .features-section .feature-card {
+    padding: 10px 14px;
+  }
+
+  .tech-section {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .tech-group {
+    flex-wrap: wrap;
   }
 
   .opensource-container {
@@ -805,6 +962,16 @@ const copyQQGroup = async () => {
 
   .contributors-list {
     max-height: 200px;
+  }
+
+  /* 更新日志移动端适配 */
+  .changelog-item {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .changelog-date {
+    min-width: auto;
   }
 }
 </style>

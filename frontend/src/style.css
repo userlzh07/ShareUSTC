@@ -1,3 +1,16 @@
+/* 防止滚动条出现/消失导致页面内容位移 */
+/* scrollbar-gutter 让滚动条始终占据空间，防止布局跳动 */
+html {
+  scrollbar-gutter: stable;
+}
+
+/* 对于不支持 scrollbar-gutter 的浏览器，使用 overflow-y: scroll 作为回退 */
+@supports not (scrollbar-gutter: stable) {
+  html {
+    overflow-y: scroll;
+  }
+}
+
 /* 隐藏文本编辑光标，但允许选中文本 */
 *,
 *::before,

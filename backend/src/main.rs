@@ -220,6 +220,9 @@ async fn main() -> std::io::Result<()> {
             // 排除 /api/users/me 和 /api/users/verify
             PublicPathRule::with_methods("/api/users", vec![Method::GET])
                 .exclude(vec!["/api/users/me", "/api/users/verify"]),
+            // /api/teachers 和 /api/courses GET 方法公开（供游客筛选资源）
+            PublicPathRule::with_methods("/api/teachers", vec![Method::GET]),
+            PublicPathRule::with_methods("/api/courses", vec![Method::GET]),
         ];
 
         let jwt_auth = JwtAuth::new(jwt_secret.clone()).with_public_rules(public_rules);

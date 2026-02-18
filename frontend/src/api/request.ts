@@ -15,6 +15,25 @@ const request: AxiosInstance = axios.create({
     'Content-Type': 'application/json'
   },
   withCredentials: true, // 启用 Cookie 支持，使浏览器自动发送 HttpOnly Cookie
+  paramsSerializer: {
+    // 自定义数组参数序列化格式，使用逗号分隔值
+    // 例如: teacherSns=1,2,3 而不是 teacherSns[]=1&teacherSns[]=2
+    serialize: (params) => {
+      const parts: string[] = [];
+      for (const [key, value] of Object.entries(params)) {
+        if (value === undefined || value === null) continue;
+        if (Array.isArray(value)) {
+          if (value.length > 0) {
+            // 数组格式: key=val1,val2,val3（逗号分隔）
+            parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value.join(','))}`);
+          }
+        } else {
+          parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+        }
+      }
+      return parts.join('&');
+    }
+  }
 });
 
 // 请求拦截器

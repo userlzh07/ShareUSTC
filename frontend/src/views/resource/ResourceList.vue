@@ -27,6 +27,46 @@
       </div>
 
       <div class="filter-row">
+        <el-select
+          v-model="filterCourseSns"
+          placeholder="关联课程"
+          clearable
+          multiple
+          filterable
+          collapse-tags
+          collapse-tags-tooltip
+          class="filter-item"
+          :disabled="loading || loadingCourses"
+          :loading="loadingCourses"
+        >
+          <el-option
+            v-for="course in courseList"
+            :key="course.sn"
+            :label="course.name + (course.semester ? ` (${course.semester})` : '')"
+            :value="course.sn"
+          />
+        </el-select>
+
+        <el-select
+          v-model="filterTeacherSns"
+          placeholder="关联教师"
+          clearable
+          multiple
+          filterable
+          collapse-tags
+          collapse-tags-tooltip
+          class="filter-item"
+          :disabled="loading || loadingTeachers"
+          :loading="loadingTeachers"
+        >
+          <el-option
+            v-for="teacher in teacherList"
+            :key="teacher.sn"
+            :label="teacher.name + (teacher.department ? ` (${teacher.department})` : '')"
+            :value="teacher.sn"
+          />
+        </el-select>
+
         <el-select v-model="filterType" placeholder="资源类型" clearable class="filter-item" :disabled="loading">
           <el-option
             v-for="(label, value) in ResourceTypeFilterLabels"
@@ -52,7 +92,6 @@
           <el-option label="最高评分" value="rating" />
           <el-option label="标题降序" value="title" />
         </el-select>
-
       </div>
     </el-card>
 
@@ -90,21 +129,27 @@
 
         <h3 class="resource-title">{{ resource.title }}</h3>
 
-        <p v-if="resource.courseName" class="resource-course">
-          <el-icon><Reading /></el-icon>
-          {{ resource.courseName }}
+        <p class="resource-course">
+          <template v-if="resource.courseName">
+            <el-icon><Reading /></el-icon>
+            {{ resource.courseName }}
+          </template>
+          <span v-else class="placeholder">&nbsp;</span>
         </p>
 
-        <div class="resource-tags" v-if="resource.tags && resource.tags.length > 0">
-          <el-tag
-            v-for="tag in resource.tags.slice(0, 3)"
-            :key="tag"
-            size="small"
-            effect="plain"
-          >
-            {{ tag }}
-          </el-tag>
-          <span v-if="resource.tags.length > 3" class="more-tags">+{{ resource.tags.length - 3 }}</span>
+        <div class="resource-tags">
+          <template v-if="resource.tags && resource.tags.length > 0">
+            <el-tag
+              v-for="tag in resource.tags.slice(0, 3)"
+              :key="tag"
+              size="small"
+              effect="plain"
+            >
+              {{ tag }}
+            </el-tag>
+            <span v-if="resource.tags.length > 3" class="more-tags">+{{ resource.tags.length - 3 }}</span>
+          </template>
+          <span v-else class="placeholder">&nbsp;</span>
         </div>
 
         <div class="resource-stats">
@@ -150,6 +195,8 @@ import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Search, Upload, Reading, View, Download, Star, Loading } from '@element-plus/icons-vue';
 import { getResourceList, searchResources } from '../../api/resource';
+import { getTeachers } from '../../api/teacher';
+import { getCourses } from '../../api/course';
 import {
   ResourceTypeLabels,
   ResourceTypeFilterLabels,
@@ -157,6 +204,8 @@ import {
   type ResourceListItem,
   type ResourceCategoryType
 } from '../../types/resource';
+import type { Teacher } from '../../types/teacher';
+import type { Course } from '../../types/course';
 
 const router = useRouter();
 
@@ -172,6 +221,14 @@ const searchQuery = ref('');
 const filterType = ref('');
 const filterCategory = ref('');
 const sortBy = ref<'created_at' | 'downloads' | 'likes' | 'rating' | 'title'>('created_at');
+const filterTeacherSns = ref<number[]>([]);
+const filterCourseSns = ref<number[]>([]);
+
+// 教师和课程列表
+const teacherList = ref<Teacher[]>([]);
+const courseList = ref<Course[]>([]);
+const loadingTeachers = ref(false);
+const loadingCourses = ref(false);
 
 // 是否在搜索模式
 const isSearchMode = computed(() => searchQuery.value.trim().length > 0);
@@ -227,11 +284,41 @@ const formatTime = (time: string) => {
   });
 };
 
+// 加载教师列表
+const loadTeachers = async () => {
+  loadingTeachers.value = true;
+  try {
+    const teachers = await getTeachers();
+    teacherList.value = teachers;
+  } catch (error: any) {
+    console.error('加载教师列表失败:', error);
+  } finally {
+    loadingTeachers.value = false;
+  }
+};
+
+// 加载课程列表
+const loadCourses = async () => {
+  loadingCourses.value = true;
+  try {
+    const courses = await getCourses();
+    courseList.value = courses;
+  } catch (error: any) {
+    console.error('加载课程列表失败:', error);
+  } finally {
+    loadingCourses.value = false;
+  }
+};
+
 // 加载资源列表
 const loadResources = async () => {
   loading.value = true;
   try {
     let response;
+
+    // 准备筛选参数
+    const teacherSns = filterTeacherSns.value.length > 0 ? filterTeacherSns.value : undefined;
+    const courseSns = filterCourseSns.value.length > 0 ? filterCourseSns.value : undefined;
 
     if (isSearchMode.value) {
       response = await searchResources({
@@ -239,7 +326,9 @@ const loadResources = async () => {
         page: currentPage.value,
         perPage: pageSize.value,
         resourceType: filterType.value || undefined,
-        category: filterCategory.value || undefined
+        category: filterCategory.value || undefined,
+        teacherSns,
+        courseSns
       });
     } else {
       response = await getResourceList({
@@ -248,7 +337,9 @@ const loadResources = async () => {
         resourceType: filterType.value || undefined,
         category: filterCategory.value || undefined,
         sortBy: sortBy.value,
-        sortOrder: 'desc'
+        sortOrder: 'desc',
+        teacherSns,
+        courseSns
       });
     }
 
@@ -293,14 +384,16 @@ const goToDetail = (id: string) => {
 };
 
 // 监听筛选条件变化
-watch([filterType, filterCategory, sortBy], () => {
+watch([filterType, filterCategory, sortBy, filterTeacherSns, filterCourseSns], () => {
   currentPage.value = 1;
   loadResources();
-});
+}, { deep: true });
 
 // 页面加载时获取资源列表
 onMounted(() => {
   loadResources();
+  loadTeachers();
+  loadCourses();
 });
 </script>
 
@@ -418,76 +511,123 @@ onMounted(() => {
 .resource-card {
   cursor: pointer;
   transition: all 0.3s;
+  height: 240px;
+  display: flex;
+  flex-direction: column;
 }
 
 .resource-card:hover {
   transform: translateY(-4px);
 }
 
-.resource-header {
+/* 覆盖 el-card 的默认样式，确保高度一致 */
+.resource-card :deep(.el-card__body) {
+  height: 100%;
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  padding: 16px;
+  box-sizing: border-box;
 }
 
+/* 头部区域：固定高度 22px，更紧凑 */
+.resource-header {
+  display: flex;
+  gap: 6px;
+  height: 22px;
+  flex-shrink: 0;
+  align-items: center;
+  overflow: hidden;
+}
+
+/* 标题区域：固定高度 40px（2行），减少行高和上边距 */
 .resource-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  margin: 0 0 12px 0;
+  margin: 4px 0 0 0;
   color: var(--el-text-color-primary);
-  line-height: 1.4;
+  line-height: 20px;
+  height: 40px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
+/* 课程名称区域：固定高度 18px，减少上边距 */
 .resource-course {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--el-text-color-secondary);
-  margin-bottom: 12px;
+  height: 18px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
+/* 标签区域：固定高度 24px，减少gap和上边距 */
 .resource-tags {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
+  gap: 4px;
+  height: 24px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  align-items: center;
+  overflow: hidden;
 }
 
 .more-tags {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--el-text-color-secondary);
+  line-height: 20px;
 }
 
+/* 统计区域：固定高度 26px，减少padding和上边距 */
 .resource-stats {
   display: flex;
-  gap: 16px;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  gap: 12px;
+  height: 26px;
+  margin-top: auto;
+  padding-top: 4px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  flex-shrink: 0;
+  align-items: center;
 }
 
 .stat-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-}
-
-.resource-footer {
-  display: flex;
-  justify-content: space-between;
+  gap: 2px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
 }
 
+/* 底部区域：固定高度 18px，减少上边距 */
+.resource-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  height: 18px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  align-items: center;
+  overflow: hidden;
+}
+
 .uploader {
   font-weight: 500;
+}
+
+/* 占位符样式，确保无内容时高度不变 */
+.placeholder {
+  display: inline-block;
+  width: 1px;
+  visibility: hidden;
 }
 
 .pagination-container {
