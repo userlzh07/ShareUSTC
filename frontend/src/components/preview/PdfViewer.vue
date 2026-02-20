@@ -122,6 +122,16 @@ let pdfDoc: any = null;
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const fullscreenCanvasRef = ref<HTMLCanvasElement | null>(null);
 
+// 超时包装函数
+const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} 超时 (${timeoutMs}ms)`)), timeoutMs)
+    )
+  ]);
+};
+
 const loadPdf = async () => {
   loading.value = true;
   error.value = false;
@@ -160,7 +170,8 @@ const loadPdf = async () => {
       logger.debug('[PdfViewer]', `加载进度 | loaded=${progress.loaded}, total=${progress.total}`);
     };
 
-    pdfDoc = await loadingTask.promise;
+    // 设置20秒超时，避免在不受支持的浏览器上无限等待
+    pdfDoc = await withTimeout(loadingTask.promise, 20000, 'PDF加载');
     logger.info('[PdfViewer]', `PDF文档加载成功 | pages=${pdfDoc.numPages}`);
 
     totalPages.value = pdfDoc.numPages;
