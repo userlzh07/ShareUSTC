@@ -99,8 +99,9 @@ const loadImage = async () => {
     logger.debug('[ImageViewer]', `创建的Blob URL | url=${url.substring(0, 60)}...`);
     imageUrl.value = url;
 
-    // 保持 loading 状态，等待 img 标签的 @load 或 @error 事件
-    loading.value = true;
+    // Blob URL 已创建，可以结束 loading 状态，让 <img> 标签渲染
+    // <img> 标签的 @load 事件会再次确认加载完成
+    loading.value = false;
   } catch (err: any) {
     logger.error('[ImageViewer]', '加载图片失败', err);
     error.value = true;
