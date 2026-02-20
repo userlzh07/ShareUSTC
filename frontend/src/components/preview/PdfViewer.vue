@@ -5,8 +5,19 @@
     </div>
 
     <div v-else-if="error" class="error-container">
-      <el-empty description="PDF 加载失败" />
-      <el-button type="primary" @click="loadPdf">重试</el-button>
+      <el-icon :size="64" color="var(--el-color-danger)"><DocumentDelete /></el-icon>
+      <div class="error-message">
+        <p class="error-line">PDF预览加载失败，请下载后自行预览</p>
+        <p class="error-line">请使用适配本网站的浏览器，如chrome、firefox、edge、via</p>
+        <p class="error-line"><strong>不要使用</strong>系统自带、百度、夸克、QQ、UC等浏览器</p>
+        <p class="error-line">如果更换浏览器后仍无法加载，请联系我们</p>
+      </div>
+      <div class="error-actions">
+        <el-button type="primary" @click="downloadPdf">
+          <el-icon class="el-icon--left"><Download /></el-icon>下载PDF
+        </el-button>
+        <el-button @click="loadPdf">重试加载</el-button>
+      </div>
     </div>
 
     <div v-else class="pdf-container">
@@ -86,11 +97,12 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue';
-import { ArrowLeft, ArrowRight, ZoomIn, ZoomOut, FullScreen } from '@element-plus/icons-vue';
+import { ArrowLeft, ArrowRight, ZoomIn, ZoomOut, FullScreen, Download, DocumentDelete } from '@element-plus/icons-vue';
 import * as pdfjsLib from 'pdfjs-dist';
 import PDFWorker from 'pdfjs-dist/build/pdf.worker.mjs?worker';
-import { getResourcePreviewInfo, getResourcePreviewContent, type PreviewUrlResponse } from '../../api/resource';
+import { getResourcePreviewInfo, getResourcePreviewContent, downloadResource, type PreviewUrlResponse } from '../../api/resource';
 import logger from '../../utils/logger';
+import { ElMessage } from 'element-plus';
 
 // 设置 PDF.js worker - 使用 Vite 的 worker 导入
 pdfjsLib.GlobalWorkerOptions.workerPort = new PDFWorker();
@@ -303,6 +315,17 @@ const toggleFullscreen = async () => {
   }
 };
 
+const downloadPdf = async () => {
+  try {
+    logger.info('[PdfViewer]', `开始下载PDF | resourceId=${props.resourceId}`);
+    await downloadResource(props.resourceId);
+    ElMessage.success('已开始下载');
+  } catch (err: any) {
+    logger.error('[PdfViewer]', 'PDF下载失败', err);
+    ElMessage.error('下载失败，请稍后重试');
+  }
+};
+
 // 监听resourceId变化
 watch(() => props.resourceId, () => {
   loadPdf();
@@ -316,8 +339,39 @@ watch(() => props.resourceId, () => {
 
 .loading-container,
 .error-container {
-  padding: 40px 0;
+  padding: 40px 20px;
   text-align: center;
+}
+
+.error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.error-message {
+  margin-top: 16px;
+}
+
+.error-line {
+  margin: 8px 0;
+  font-size: 14px;
+  color: var(--el-text-color-regular);
+  line-height: 1.6;
+}
+
+.error-line strong {
+  color: var(--el-color-danger);
+  font-weight: 600;
+}
+
+.error-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .loading-text {
