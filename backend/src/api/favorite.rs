@@ -1,4 +1,4 @@
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse, Responder};
 use uuid::Uuid;
 
 use crate::config::Config;
@@ -6,7 +6,7 @@ use crate::db::AppState;
 use crate::models::{
     AddToFavoriteRequest, CreateFavoriteRequest, CurrentUser, UpdateFavoriteRequest,
 };
-use crate::services::{FavoriteService, ResourceError};
+use crate::services::{AuditLogService, FavoriteService, ResourceError};
 use crate::utils::{bad_request, conflict, forbidden, internal_error, not_found};
 
 /// 对文件名进行 RFC 5987 编码，用于支持中文等非 ASCII 字符
@@ -62,6 +62,7 @@ pub async fn create_favorite(
     state: web::Data<AppState>,
     user: web::ReqData<CurrentUser>,
     request: web::Json<CreateFavoriteRequest>,
+    req: HttpRequest,
 ) -> impl Responder {
     log::info!(
         "[Favorite] 创建收藏夹 | user_id={}, name={}",
@@ -69,6 +70,7 @@ pub async fn create_favorite(
         request.name
     );
 
+    let favorite_name = request.name.clone();
     match FavoriteService::create_favorite(&state.pool, user.id, request.into_inner()).await {
         Ok(response) => {
             log::info!(
@@ -76,6 +78,25 @@ pub async fn create_favorite(
                 response.id,
                 user.id
             );
+
+            // 记录审计日志
+            let ip_address = req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_create_favorite(
+                &state.pool,
+                user.id,
+                response.id,
+                &favorite_name,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录创建收藏夹日志失败 | favorite_id={}, error={}",
+                    response.id,
+                    e
+                );
+            }
+
             HttpResponse::Created().json(response)
         }
         Err(e) => {
@@ -351,13 +372,14 @@ pub async fn download_favorite(
     state: web::Data<AppState>,
     user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
+    req: HttpRequest,
 ) -> impl Responder {
     let favorite_id = path.into_inner();
 
-    // 首先获取收藏夹名称
-    let favorite_name =
+    // 首先获取收藏夹详情
+    let favorite_detail =
         match FavoriteService::get_favorite_detail(&state.pool, favorite_id, user.id).await {
-            Ok(detail) => detail.name,
+            Ok(detail) => detail,
             Err(e) => {
                 return match e {
                     ResourceError::NotFound(msg) => not_found(&msg),
@@ -366,6 +388,9 @@ pub async fn download_favorite(
                 };
             }
         };
+
+    let favorite_name = favorite_detail.name.clone();
+    let resource_count = favorite_detail.resource_count as usize;
 
     // 打包下载
     // 加载配置用于创建存储后端（支持混合存储）
@@ -381,6 +406,28 @@ pub async fn download_favorite(
     .await
     {
         Ok((zip_data, filename)) => {
+            let download_size = zip_data.len() as i64;
+
+            // 记录审计日志
+            let ip_address = req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_pack_download(
+                &state.pool,
+                user.id,
+                favorite_id,
+                &favorite_name,
+                download_size,
+                resource_count,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录打包下载日志失败 | favorite_id={}, error={}",
+                    favorite_id,
+                    e
+                );
+            }
+
             // 构建 Content-Disposition 头，支持中文文件名
             let content_disposition = build_content_disposition(&filename);
 

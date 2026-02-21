@@ -2,13 +2,13 @@ use crate::db::AppState;
 use crate::models::{
     CurrentUser, UpdateProfileRequest, UserHomepageQuery, UserRole, VerificationRequest,
 };
-use crate::services::{UserError, UserService};
+use crate::services::{AuditLogService, UserError, UserService};
 use crate::utils::{
     bad_request, forbidden, generate_access_token, generate_refresh_token, internal_error,
     not_found,
 };
 use actix_web::cookie::{time::Duration as CookieDuration, Cookie, SameSite};
-use actix_web::{get, post, put, web, HttpResponse, Responder};
+use actix_web::{get, post, put, web, HttpRequest, HttpResponse, Responder};
 use uuid::Uuid;
 
 /// Cookie 名称常量
@@ -68,6 +68,7 @@ pub async fn update_profile(
     state: web::Data<AppState>,
     user: web::ReqData<CurrentUser>,
     req: web::Json<UpdateProfileRequest>,
+    http_req: HttpRequest,
 ) -> impl Responder {
     // 检查是否为实名用户或管理员
     let is_verified = user.role == crate::models::UserRole::Verified
@@ -83,6 +84,24 @@ pub async fn update_profile(
     match UserService::update_profile(&state.pool, user.id, req.into_inner(), is_verified).await {
         Ok(user_info) => {
             log::info!("[User] 用户资料更新成功 | user_id={}", user.id);
+
+            // 记录审计日志
+            let ip_address = http_req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_update_profile(
+                &state.pool,
+                user.id,
+                &user_info.username,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录更新个人主页日志失败 | user_id={}, error={}",
+                    user.id,
+                    e
+                );
+            }
+
             HttpResponse::Ok().json(user_info)
         }
         Err(e) => {

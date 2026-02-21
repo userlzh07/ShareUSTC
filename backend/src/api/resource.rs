@@ -740,6 +740,7 @@ pub async fn update_resource_content(
     user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
     request: web::Json<UpdateResourceContentRequest>,
+    req: HttpRequest,
 ) -> impl Responder {
     let resource_id = path.into_inner();
 
@@ -747,6 +748,23 @@ pub async fn update_resource_content(
     if let Err(msg) = request.validate() {
         return bad_request(&msg);
     }
+
+    // 获取资源信息（用于审计日志）
+    let resource_detail = match ResourceService::get_resource_detail(&state.pool, resource_id).await {
+        Ok(detail) => detail,
+        Err(e) => {
+            log::warn!(
+                "[Resource] 获取资源详情失败 | resource_id={}, user_id={}, error={}",
+                resource_id,
+                user.id,
+                e
+            );
+            return match e {
+                ResourceError::NotFound(msg) => not_found(&msg),
+                _ => internal_error("获取资源详情失败"),
+            };
+        }
+    };
 
     match ResourceService::update_resource_content(
         &state.pool,
@@ -757,7 +775,23 @@ pub async fn update_resource_content(
     )
     .await
     {
-        Ok(response) => HttpResponse::Ok().json(response),
+        Ok(response) => {
+            // 记录审计日志
+            let ip_address = req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_update_resource(
+                &state.pool,
+                user.id,
+                resource_id,
+                &resource_detail.title,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!("[Audit] 记录资源更新日志失败 | resource_id={}, error={}", resource_id, e);
+            }
+
+            HttpResponse::Ok().json(response)
+        }
         Err(e) => {
             log::warn!(
                 "[Resource] 更新资源内容失败 | resource_id={}, user_id={}, error={}",
@@ -815,8 +849,29 @@ pub async fn rate_resource(
     user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
     request: web::Json<CreateRatingRequest>,
+    req: HttpRequest,
 ) -> impl Responder {
     let resource_id = path.into_inner();
+
+    // 获取资源信息（用于审计日志）
+    let resource_detail = match ResourceService::get_resource_detail(&state.pool, resource_id).await
+    {
+        Ok(detail) => detail,
+        Err(e) => {
+            log::warn!(
+                "[Resource] 获取资源详情失败 | resource_id={}, user_id={}, error={}",
+                resource_id,
+                user.id,
+                e
+            );
+            return match e {
+                ResourceError::NotFound(msg) => not_found(&msg),
+                _ => internal_error("获取资源详情失败"),
+            };
+        }
+    };
+
+    let overall_quality = request.overall_quality;
 
     match RatingService::create_or_update_rating(
         &state.pool,
@@ -826,7 +881,28 @@ pub async fn rate_resource(
     )
     .await
     {
-        Ok(rating) => HttpResponse::Ok().json(rating),
+        Ok(rating) => {
+            // 记录审计日志
+            let ip_address = req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_rate_resource(
+                &state.pool,
+                user.id,
+                resource_id,
+                &resource_detail.title,
+                overall_quality,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录评分日志失败 | resource_id={}, error={}",
+                    resource_id,
+                    e
+                );
+            }
+
+            HttpResponse::Ok().json(rating)
+        }
         Err(e) => {
             log::warn!(
                 "[Resource] 评分失败 | resource_id={}, user_id={}, error={}",
@@ -914,11 +990,48 @@ pub async fn toggle_like(
     state: web::Data<AppState>,
     user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
+    req: HttpRequest,
 ) -> impl Responder {
     let resource_id = path.into_inner();
 
+    // 获取资源信息（用于审计日志）
+    let resource_detail = match ResourceService::get_resource_detail(&state.pool, resource_id).await {
+        Ok(detail) => detail,
+        Err(e) => {
+            log::warn!(
+                "[Resource] 获取资源详情失败 | resource_id={}, user_id={}, error={}",
+                resource_id,
+                user.id,
+                e
+            );
+            return match e {
+                ResourceError::NotFound(msg) => not_found(&msg),
+                _ => internal_error("获取资源详情失败"),
+            };
+        }
+    };
+
     match LikeService::toggle_like(&state.pool, resource_id, user.id).await {
         Ok(result) => {
+            // 记录审计日志
+            let ip_address = req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_like_resource(
+                &state.pool,
+                user.id,
+                resource_id,
+                &resource_detail.title,
+                result.is_liked,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录点赞日志失败 | resource_id={}, error={}",
+                    resource_id,
+                    e
+                );
+            }
+
             // 转换为 camelCase 的响应结构
             let response_data = crate::models::LikeToggleResponse {
                 is_liked: result.is_liked,
@@ -1018,13 +1131,53 @@ pub async fn create_comment(
     user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
     request: web::Json<CreateCommentRequest>,
+    req: HttpRequest,
 ) -> impl Responder {
     let resource_id = path.into_inner();
+
+    // 获取资源信息（用于审计日志）
+    let resource_detail = match ResourceService::get_resource_detail(&state.pool, resource_id).await
+    {
+        Ok(detail) => detail,
+        Err(e) => {
+            log::warn!(
+                "[Resource] 获取资源详情失败 | resource_id={}, user_id={}, error={}",
+                resource_id,
+                user.id,
+                e
+            );
+            return match e {
+                ResourceError::NotFound(msg) => not_found(&msg),
+                _ => internal_error("获取资源详情失败"),
+            };
+        }
+    };
 
     match CommentService::create_comment(&state.pool, resource_id, user.id, request.into_inner())
         .await
     {
-        Ok(comment) => HttpResponse::Created().json(comment),
+        Ok(comment) => {
+            // 记录审计日志
+            let ip_address = req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_create_comment(
+                &state.pool,
+                user.id,
+                resource_id,
+                comment.id,
+                &resource_detail.title,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录发表评论日志失败 | comment_id={}, error={}",
+                    comment.id,
+                    e
+                );
+            }
+
+            HttpResponse::Created().json(comment)
+        }
         Err(e) => {
             log::warn!(
                 "[Resource] 发表评论失败 | resource_id={}, user_id={}, error={}",

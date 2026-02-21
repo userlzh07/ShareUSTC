@@ -1,16 +1,16 @@
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse, Responder};
 use uuid::Uuid;
 
 use crate::db::AppState;
 use crate::models::CurrentUser;
 use crate::models::{
-    CourseListQuery, CreateCourseRequest, CreateTeacherRequest, TeacherListQuery,
-    UpdateCourseRequest, UpdateCourseStatusRequest, UpdateTeacherRequest,
-    UpdateTeacherStatusRequest,
+    BatchImportCoursesRequest, BatchImportTeachersRequest, CourseListQuery, CreateCourseRequest,
+    CreateTeacherRequest, TeacherListQuery, UpdateCourseRequest, UpdateCourseStatusRequest,
+    UpdateTeacherRequest, UpdateTeacherStatusRequest,
 };
 use crate::services::{
-    AdminError, AdminService, AuditLogQuery, AuditResourceRequest, CourseError, CourseService,
-    TeacherError, TeacherService, UpdateUserStatusRequest,
+    AdminError, AdminService, AuditLogQuery, AuditLogService, AuditResourceRequest, CourseError,
+    CourseService, TeacherError, TeacherService, UpdateUserStatusRequest,
 };
 use crate::utils::{bad_request, forbidden, internal_error, no_content, not_found};
 
@@ -115,6 +115,7 @@ async fn update_user_status(
     current_user: actix_web::web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
     req: web::Json<UpdateUserStatusRequest>,
+    http_req: HttpRequest,
 ) -> impl Responder {
     let user = current_user.into_inner();
 
@@ -143,6 +144,26 @@ async fn update_user_status(
                 user.id,
                 user_id
             );
+
+            // 记录审计日志
+            let ip_address = http_req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_update_user_status(
+                &data.pool,
+                user.id,
+                user_id,
+                req.is_active,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录更新用户状态日志失败 | admin_id={}, target_user_id={}, error={}",
+                    user.id,
+                    user_id,
+                    e
+                );
+            }
+
             HttpResponse::Ok().json(serde_json::json!({
                 "message": "用户状态已更新"
             }))
@@ -260,6 +281,7 @@ async fn delete_comment(
     data: web::Data<AppState>,
     current_user: actix_web::web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
+    req: HttpRequest,
 ) -> impl Responder {
     let user = current_user.into_inner();
 
@@ -281,6 +303,26 @@ async fn delete_comment(
                 user.id,
                 comment_id
             );
+
+            // 记录审计日志
+            let ip_address = req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_delete_comment(
+                &data.pool,
+                user.id,
+                comment_id,
+                true, // is_admin
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录删除评论日志失败 | admin_id={}, comment_id={}, error={}",
+                    user.id,
+                    comment_id,
+                    e
+                );
+            }
+
             no_content()
         }
         Err(e) => handle_admin_error(e),
@@ -331,6 +373,7 @@ async fn send_notification(
     data: web::Data<AppState>,
     current_user: actix_web::web::ReqData<CurrentUser>,
     req: web::Json<crate::services::SendNotificationRequest>,
+    http_req: HttpRequest,
 ) -> impl Responder {
     let user = current_user.into_inner();
     log::info!(
@@ -343,9 +386,43 @@ async fn send_notification(
         return handle_admin_error(e);
     }
 
+    // 提前保存需要的数据
+    let title = req.title.clone();
+
+    // 获取接收者数量
+    let recipient_count = if req.target == "all" {
+        // 广播给所有用户，获取用户总数
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE is_active = true")
+            .fetch_one(&data.pool)
+            .await
+            .unwrap_or(0) as i32
+    } else {
+        // 指定用户
+        1
+    };
+
     match AdminService::send_notification(&data.pool, req.into_inner()).await {
         Ok(_) => {
             log::info!("[Admin] 系统通知发送成功 | admin_id={}", user.id);
+
+            // 记录审计日志
+            let ip_address = http_req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_send_notification(
+                &data.pool,
+                user.id,
+                &title,
+                recipient_count,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录发送通知日志失败 | admin_id={}, error={}",
+                    user.id,
+                    e
+                );
+            }
+
             HttpResponse::Created().json(serde_json::json!({
                 "message": "通知发送成功"
             }))
@@ -634,6 +711,80 @@ async fn delete_course(
     }
 }
 
+/// 批量导入教师
+#[post("/admin/teachers/batch-import")]
+async fn batch_import_teachers(
+    data: web::Data<AppState>,
+    current_user: actix_web::web::ReqData<CurrentUser>,
+    req: web::Json<BatchImportTeachersRequest>,
+) -> impl Responder {
+    let user = current_user.into_inner();
+    log::info!("[Admin] 批量导入教师 | admin_id={}, count={}", user.id, req.teachers.len());
+
+    if let Err(e) = check_admin(&user) {
+        return handle_admin_error(e);
+    }
+
+    // 限制单次导入数量
+    if req.teachers.len() > 1000 {
+        return bad_request("单次导入数量不能超过1000条");
+    }
+
+    if req.teachers.is_empty() {
+        return bad_request("导入数据不能为空");
+    }
+
+    match TeacherService::batch_import_teachers(&data.pool, req.teachers.clone()).await {
+        Ok(result) => {
+            log::info!(
+                "[Admin] 批量导入教师完成 | admin_id={}, success={}, fail={}",
+                user.id,
+                result.success_count,
+                result.fail_count
+            );
+            HttpResponse::Ok().json(result)
+        }
+        Err(e) => handle_teacher_error(e),
+    }
+}
+
+/// 批量导入课程
+#[post("/admin/courses/batch-import")]
+async fn batch_import_courses(
+    data: web::Data<AppState>,
+    current_user: actix_web::web::ReqData<CurrentUser>,
+    req: web::Json<BatchImportCoursesRequest>,
+) -> impl Responder {
+    let user = current_user.into_inner();
+    log::info!("[Admin] 批量导入课程 | admin_id={}, count={}", user.id, req.courses.len());
+
+    if let Err(e) = check_admin(&user) {
+        return handle_admin_error(e);
+    }
+
+    // 限制单次导入数量
+    if req.courses.len() > 1000 {
+        return bad_request("单次导入数量不能超过1000条");
+    }
+
+    if req.courses.is_empty() {
+        return bad_request("导入数据不能为空");
+    }
+
+    match CourseService::batch_import_courses(&data.pool, req.courses.clone()).await {
+        Ok(result) => {
+            log::info!(
+                "[Admin] 批量导入课程完成 | admin_id={}, success={}, fail={}",
+                user.id,
+                result.success_count,
+                result.fail_count
+            );
+            HttpResponse::Ok().json(result)
+        }
+        Err(e) => handle_course_error(e),
+    }
+}
+
 /// 配置管理后台路由
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(get_dashboard)
@@ -658,5 +809,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
         .service(create_course)
         .service(update_course)
         .service(update_course_status)
-        .service(delete_course);
+        .service(delete_course)
+        // 批量导入
+        .service(batch_import_teachers)
+        .service(batch_import_courses);
 }

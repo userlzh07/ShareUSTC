@@ -27,8 +27,22 @@
     <div class="comment-list">
       <div v-for="comment in comments" :key="comment.id" class="comment-item">
         <div class="comment-header">
-          <span class="username">{{ comment.userName }}</span>
-          <span class="time">{{ formatTime(comment.createdAt) }}</span>
+          <div class="header-left">
+            <span class="username">{{ comment.userName }}</span>
+            <span class="time">{{ formatTime(comment.createdAt) }}</span>
+          </div>
+          <div class="header-right">
+            <el-button
+              v-if="canDeleteComment(comment)"
+              type="danger"
+              link
+              size="small"
+              @click="handleDelete(comment)"
+            >
+              <el-icon><Delete /></el-icon>
+              删除
+            </el-button>
+          </div>
         </div>
         <div class="comment-content">{{ comment.content }}</div>
       </div>
@@ -50,8 +64,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
-import { ElMessage } from 'element-plus';
-import { getComments, createComment } from '../../api/comment';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { Delete } from '@element-plus/icons-vue';
+import { getComments, createComment, deleteComment } from '../../api/comment';
+import { useAuthStore } from '../../stores/auth';
 import type { Comment } from '../../types/comment';
 import logger from '../../utils/logger';
 
@@ -59,12 +75,14 @@ const props = defineProps<{
   resourceId: string;
 }>();
 
+const authStore = useAuthStore();
 const comments = ref<Comment[]>([]);
 const total = ref(0);
 const page = ref(1);
 const perPage = ref(10);
 const newComment = ref('');
 const submitting = ref(false);
+const deleting = ref(false);
 
 const loadComments = async () => {
   try {
@@ -108,6 +126,40 @@ const formatTime = (time: string) => {
   const utcTimeString = time.endsWith('Z') ? time : `${time}Z`;
   const date = new Date(utcTimeString);
   return date.toLocaleString('zh-CN');
+};
+
+// 判断是否可以删除评论（只能删除自己的评论）
+const canDeleteComment = (comment: Comment) => {
+  return authStore.isAuthenticated && comment.userId === authStore.user?.id;
+};
+
+// 删除评论
+const handleDelete = async (comment: Comment) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这条评论吗？', '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    });
+
+    deleting.value = true;
+    logger.info('[CommentSection]', `删除评论 | commentId=${comment.id}`);
+
+    await deleteComment(comment.id);
+
+    logger.info('[CommentSection]', '评论删除成功');
+    ElMessage.success('评论已删除');
+    loadComments();
+  } catch (error: any) {
+    if (error === 'cancel') return;
+
+    logger.error('[CommentSection]', '删除评论失败', { message: error.message, data: error.response?.data });
+    if (!error.isHandled) {
+      ElMessage.error(error.message || '删除失败');
+    }
+  } finally {
+    deleting.value = false;
+  }
 };
 
 onMounted(() => {
@@ -154,7 +206,19 @@ watch(() => props.resourceId, () => {
 .comment-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 8px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
 }
 
 .username {

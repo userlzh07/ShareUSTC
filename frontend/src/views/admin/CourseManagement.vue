@@ -2,9 +2,14 @@
   <div class="course-management">
     <div class="page-header">
       <h1>课程管理</h1>
-      <el-button type="primary" @click="handleAdd">
-        <el-icon><Plus /></el-icon>添加课程
-      </el-button>
+      <div class="header-actions">
+        <el-button type="success" @click="showBatchImportDialog">
+          <el-icon><Upload /></el-icon>批量导入
+        </el-button>
+        <el-button type="primary" @click="handleAdd">
+          <el-icon><Plus /></el-icon>添加课程
+        </el-button>
+      </div>
     </div>
 
     <!-- 筛选栏 -->
@@ -119,14 +124,93 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量导入弹窗 -->
+    <el-dialog
+      v-model="batchImportVisible"
+      title="批量导入课程"
+      width="700px"
+    >
+      <div class="batch-import-content">
+        <el-alert
+          title="导入格式说明"
+          type="info"
+          :closable="false"
+          style="margin-bottom: 16px"
+        >
+          <p>请提供JSON格式的课程数据，格式如下：</p>
+          <pre class="json-example">[
+  {
+    "name": "数据结构",
+    "semester": "二春",
+    "credits": 4
+  },
+  {
+    "name": "操作系统",
+    "semester": "二秋",
+    "credits": 4
+  }
+]</pre>
+          <p>说明：</p>
+          <ul>
+            <li>name（课程名称）：必填，最长255字符</li>
+            <li>semester（开课学期）：可选，如"一春"、"二秋"等</li>
+            <li>credits（学分）：可选，0-100之间的数字</li>
+            <li>单次导入最多1000条</li>
+          </ul>
+        </el-alert>
+
+        <el-form label-width="0">
+          <el-form-item>
+            <el-input
+              v-model="batchImportJson"
+              type="textarea"
+              :rows="12"
+              placeholder="请粘贴JSON格式的课程数据"
+            />
+          </el-form-item>
+        </el-form>
+
+        <!-- 导入结果 -->
+        <div v-if="batchImportResult" class="import-result">
+          <el-divider />
+          <h4>导入结果</h4>
+          <el-alert
+            :type="batchImportResult.failCount === 0 ? 'success' : 'warning'"
+            :closable="false"
+          >
+            <p>成功：{{ batchImportResult.successCount }} 条</p>
+            <p>失败：{{ batchImportResult.failCount }} 条</p>
+          </el-alert>
+          <el-table
+            v-if="batchImportResult.failedItems.length > 0"
+            :data="batchImportResult.failedItems"
+            size="small"
+            style="margin-top: 12px"
+            max-height="200"
+          >
+            <el-table-column prop="name" label="课程名称" width="200" />
+            <el-table-column prop="reason" label="失败原因" />
+          </el-table>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="batchImportVisible = false">关闭</el-button>
+        <el-button type="primary" @click="handleBatchImport" :loading="batchImportLoading">
+          开始导入
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Plus } from '@element-plus/icons-vue';
-import { getCourseList, createCourse, updateCourse, updateCourseStatus, deleteCourse } from '@/api/admin';
+import { Plus, Upload } from '@element-plus/icons-vue';
+import { getCourseList, createCourse, updateCourse, updateCourseStatus, deleteCourse, batchImportCourses } from '@/api/admin';
+import type { BatchImportCourseItem, BatchImportCoursesResult } from '@/api/admin';
 import { SemesterOptions } from '@/types/course';
 import type { CourseListItem, CreateCourseRequest, UpdateCourseRequest } from '@/types/course';
 
@@ -154,6 +238,64 @@ const form = ref({
 
 const rules = {
   name: [{ required: true, message: '请输入课程名称', trigger: 'blur' }]
+};
+
+// 批量导入
+const batchImportVisible = ref(false);
+const batchImportJson = ref('');
+const batchImportLoading = ref(false);
+const batchImportResult = ref<BatchImportCoursesResult | null>(null);
+
+// 显示批量导入弹窗
+const showBatchImportDialog = () => {
+  batchImportVisible.value = true;
+  batchImportJson.value = '';
+  batchImportResult.value = null;
+};
+
+// 处理批量导入
+const handleBatchImport = async () => {
+  if (!batchImportJson.value.trim()) {
+    ElMessage.warning('请输入JSON数据');
+    return;
+  }
+
+  let courses: BatchImportCourseItem[];
+  try {
+    courses = JSON.parse(batchImportJson.value);
+    if (!Array.isArray(courses)) {
+      ElMessage.error('JSON格式错误：必须为数组格式');
+      return;
+    }
+  } catch (error) {
+    ElMessage.error('JSON解析失败，请检查格式');
+    return;
+  }
+
+  if (courses.length === 0) {
+    ElMessage.warning('导入数据不能为空');
+    return;
+  }
+
+  if (courses.length > 1000) {
+    ElMessage.warning('单次导入数量不能超过1000条');
+    return;
+  }
+
+  batchImportLoading.value = true;
+  try {
+    const result = await batchImportCourses(courses);
+    batchImportResult.value = result;
+    ElMessage.success(`导入完成：成功 ${result.successCount} 条，失败 ${result.failCount} 条`);
+    // 刷新列表
+    if (result.successCount > 0) {
+      fetchCourses();
+    }
+  } catch (error: any) {
+    ElMessage.error(error.message || '导入失败');
+  } finally {
+    batchImportLoading.value = false;
+  }
 };
 
 
@@ -316,5 +458,36 @@ onMounted(fetchCourses);
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.batch-import-content {
+  .json-example {
+    background: #f5f7fa;
+    padding: 12px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
+    margin: 12px 0;
+    overflow-x: auto;
+  }
+
+  ul {
+    margin: 8px 0;
+    padding-left: 20px;
+  }
+
+  li {
+    margin: 4px 0;
+    line-height: 1.6;
+  }
+}
+
+.import-result {
+  margin-top: 16px;
 }
 </style>

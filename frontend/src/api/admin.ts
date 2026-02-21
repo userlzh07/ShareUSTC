@@ -294,6 +294,51 @@ export const deleteCourse = (sn: number): Promise<void> => {
   return request.delete(`/admin/courses/${sn}`);
 };
 
+// =====================
+// 批量导入相关
+// =====================
+
+export interface BatchImportCourseItem {
+  name: string;
+  semester?: string;
+  credits?: number;
+}
+
+export interface FailedCourseImportItem {
+  name: string;
+  reason: string;
+}
+
+export interface BatchImportCoursesResult {
+  successCount: number;
+  failCount: number;
+  failedItems: FailedCourseImportItem[];
+}
+
+export interface BatchImportTeacherItem {
+  name: string;
+  department?: string;
+}
+
+export interface FailedTeacherImportItem {
+  name: string;
+  reason: string;
+}
+
+export interface BatchImportTeachersResult {
+  successCount: number;
+  failCount: number;
+  failedItems: FailedTeacherImportItem[];
+}
+
+export const batchImportCourses = (courses: BatchImportCourseItem[]): Promise<BatchImportCoursesResult> => {
+  return request.post('/admin/courses/batch-import', { courses });
+};
+
+export const batchImportTeachers = (teachers: BatchImportTeacherItem[]): Promise<BatchImportTeachersResult> => {
+  return request.post('/admin/teachers/batch-import', { teachers });
+};
+
 // 导出API对象
 export const adminApi = {
   getDashboardStats,
@@ -318,5 +363,8 @@ export const adminApi = {
   createCourse,
   updateCourse,
   updateCourseStatus,
-  deleteCourse
+  deleteCourse,
+  // 批量导入
+  batchImportCourses,
+  batchImportTeachers
 };

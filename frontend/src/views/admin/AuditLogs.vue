@@ -189,7 +189,6 @@ const query = reactive<AuditLogQuery>({
 const actionOptions = [
   { value: 'register', label: '用户注册' },
   { value: 'login', label: '用户登录' },
-  { value: 'logout', label: '用户登出' },
   { value: 'upload_resource', label: '上传资源' },
   { value: 'delete_resource', label: '删除资源' },
   { value: 'update_resource', label: '更新资源' },
@@ -198,9 +197,12 @@ const actionOptions = [
   { value: 'delete_comment', label: '删除评论' },
   { value: 'rate_resource', label: '评分资源' },
   { value: 'like_resource', label: '点赞资源' },
+  { value: 'unlike_resource', label: '取消点赞' },
   { value: 'create_favorite', label: '创建收藏夹' },
-  { value: 'audit_resource', label: '审核资源' },
-  { value: 'audit_comment', label: '审核评论' },
+  { value: 'pack_download', label: '打包下载' },
+  { value: 'update_profile', label: '更新个人主页' },
+  { value: 'audit_resource', label: '审核资源（预留）' },
+  { value: 'audit_comment', label: '审核评论（预留）' },
   { value: 'update_user_status', label: '更新用户状态' },
   { value: 'send_notification', label: '发送通知' }
 ];
@@ -274,7 +276,6 @@ const formatAction = (action: string): string => {
   const actionMap: Record<string, string> = {
     'register': '注册',
     'login': '登录',
-    'logout': '登出',
     'upload_resource': '上传资源',
     'delete_resource': '删除资源',
     'update_resource': '更新资源',
@@ -283,9 +284,12 @@ const formatAction = (action: string): string => {
     'delete_comment': '删除评论',
     'rate_resource': '评分资源',
     'like_resource': '点赞资源',
+    'unlike_resource': '取消点赞',
     'create_favorite': '创建收藏夹',
-    'audit_resource': '审核资源',
-    'audit_comment': '审核评论',
+    'pack_download': '打包下载',
+    'update_profile': '更新个人主页',
+    'audit_resource': '审核资源（预留）',
+    'audit_comment': '审核评论（预留）',
     'update_user_status': '更新用户状态',
     'send_notification': '发送通知'
   };

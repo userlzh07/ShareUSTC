@@ -1,10 +1,8 @@
-use chrono::NaiveDateTime;
-use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 use crate::models::{
-    CreateTeacherRequest, Teacher, TeacherListQuery, TeacherListResponse, UpdateTeacherRequest,
+    BatchImportTeacherItem, BatchImportTeachersResult, CreateTeacherRequest,
+    FailedTeacherImportItem, Teacher, TeacherListQuery, TeacherListResponse, UpdateTeacherRequest,
     UpdateTeacherStatusRequest,
 };
 
@@ -226,5 +224,107 @@ impl TeacherService {
         }
 
         Ok(())
+    }
+
+    /// 批量导入教师
+    pub async fn batch_import_teachers(
+        pool: &PgPool,
+        items: Vec<BatchImportTeacherItem>,
+    ) -> Result<BatchImportTeachersResult, TeacherError> {
+        let mut success_count = 0i32;
+        let mut fail_count = 0i32;
+        let mut failed_items: Vec<FailedTeacherImportItem> = Vec::new();
+
+        for item in items {
+            // 验证数据
+            if item.name.trim().is_empty() {
+                fail_count += 1;
+                failed_items.push(FailedTeacherImportItem {
+                    name: item.name.clone(),
+                    reason: "教师姓名不能为空".to_string(),
+                });
+                continue;
+            }
+
+            if item.name.len() > 100 {
+                fail_count += 1;
+                failed_items.push(FailedTeacherImportItem {
+                    name: item.name.clone(),
+                    reason: "教师姓名不能超过100个字符".to_string(),
+                });
+                continue;
+            }
+
+            if let Some(ref dept) = item.department {
+                if dept.len() > 100 {
+                    fail_count += 1;
+                    failed_items.push(FailedTeacherImportItem {
+                        name: item.name.clone(),
+                        reason: "学院名称不能超过100个字符".to_string(),
+                    });
+                    continue;
+                }
+            }
+
+            // 检查是否已存在同名教师（同姓名+同学院视为重复）
+            let existing: Option<(i64,)> = if let Some(ref dept) = item.department {
+                sqlx::query_as(
+                    "SELECT sn FROM teachers WHERE name = $1 AND department = $2 LIMIT 1"
+                )
+                .bind(&item.name)
+                .bind(dept)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| TeacherError::DatabaseError(e.to_string()))?
+            } else {
+                sqlx::query_as(
+                    "SELECT sn FROM teachers WHERE name = $1 AND department IS NULL LIMIT 1"
+                )
+                .bind(&item.name)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| TeacherError::DatabaseError(e.to_string()))?
+            };
+
+            if existing.is_some() {
+                fail_count += 1;
+                failed_items.push(FailedTeacherImportItem {
+                    name: item.name.clone(),
+                    reason: "教师姓名在该学院已存在".to_string(),
+                });
+                continue;
+            }
+
+            // 插入教师
+            let result = sqlx::query(
+                r#"
+                INSERT INTO teachers (name, department, is_active)
+                VALUES ($1, $2, true)
+                "#
+            )
+            .bind(&item.name)
+            .bind(&item.department)
+            .execute(pool)
+            .await;
+
+            match result {
+                Ok(_) => {
+                    success_count += 1;
+                }
+                Err(e) => {
+                    fail_count += 1;
+                    failed_items.push(FailedTeacherImportItem {
+                        name: item.name.clone(),
+                        reason: format!("数据库错误: {}", e),
+                    });
+                }
+            }
+        }
+
+        Ok(BatchImportTeachersResult {
+            success_count,
+            fail_count,
+            failed_items,
+        })
     }
 }

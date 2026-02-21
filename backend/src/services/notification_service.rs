@@ -451,7 +451,7 @@ impl NotificationService {
             ),
             notification_type: NotificationType::CommentReply,
             priority: NotificationPriority::Normal,
-            link_url: Some(format!("/resource/{}", resource_id)),
+            link_url: Some(format!("/resources/{}", resource_id)),
         };
 
         Self::create_notification(pool, request).await?;
@@ -472,7 +472,7 @@ impl NotificationService {
             content: format!("用户 {} 评分了您的资源《{}》", rater_name, resource_title),
             notification_type: NotificationType::RatingReminder,
             priority: NotificationPriority::Normal,
-            link_url: Some(format!("/resource/{}", resource_id)),
+            link_url: Some(format!("/resources/{}", resource_id)),
         };
 
         Self::create_notification(pool, request).await?;

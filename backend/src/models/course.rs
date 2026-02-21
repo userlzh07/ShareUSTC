@@ -142,3 +142,36 @@ pub struct CourseListResponse {
     pub page: i32,
     pub per_page: i32,
 }
+
+/// 批量导入课程请求项
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportCourseItem {
+    pub name: String,
+    pub semester: Option<String>,
+    pub credits: Option<f64>,
+}
+
+/// 批量导入课程请求 DTO
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportCoursesRequest {
+    pub courses: Vec<BatchImportCourseItem>,
+}
+
+/// 批量导入课程结果
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportCoursesResult {
+    pub success_count: i32,
+    pub fail_count: i32,
+    pub failed_items: Vec<FailedCourseImportItem>,
+}
+
+/// 导入失败的课程项
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedCourseImportItem {
+    pub name: String,
+    pub reason: String,
+}

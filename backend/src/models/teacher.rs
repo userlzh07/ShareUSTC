@@ -127,3 +127,35 @@ pub struct TeacherListResponse {
     pub page: i32,
     pub per_page: i32,
 }
+
+/// 批量导入教师请求项
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportTeacherItem {
+    pub name: String,
+    pub department: Option<String>,
+}
+
+/// 批量导入教师请求 DTO
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportTeachersRequest {
+    pub teachers: Vec<BatchImportTeacherItem>,
+}
+
+/// 批量导入教师结果
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportTeachersResult {
+    pub success_count: i32,
+    pub fail_count: i32,
+    pub failed_items: Vec<FailedTeacherImportItem>,
+}
+
+/// 导入失败的教师项
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedTeacherImportItem {
+    pub name: String,
+    pub reason: String,
+}

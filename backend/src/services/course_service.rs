@@ -1,8 +1,8 @@
 use sqlx::PgPool;
 
 use crate::models::{
-    Course, CourseListQuery, CourseListResponse, CreateCourseRequest, UpdateCourseRequest,
-    UpdateCourseStatusRequest,
+    BatchImportCourseItem, BatchImportCoursesResult, Course, CourseListQuery, CourseListResponse,
+    CreateCourseRequest, FailedCourseImportItem, UpdateCourseRequest, UpdateCourseStatusRequest,
 };
 
 /// 课程服务错误类型
@@ -227,5 +227,108 @@ impl CourseService {
         }
 
         Ok(())
+    }
+
+    /// 批量导入课程
+    pub async fn batch_import_courses(
+        pool: &PgPool,
+        items: Vec<BatchImportCourseItem>,
+    ) -> Result<BatchImportCoursesResult, CourseError> {
+        let mut success_count = 0i32;
+        let mut fail_count = 0i32;
+        let mut failed_items: Vec<FailedCourseImportItem> = Vec::new();
+
+        for item in items {
+            // 验证数据
+            if item.name.trim().is_empty() {
+                fail_count += 1;
+                failed_items.push(FailedCourseImportItem {
+                    name: item.name.clone(),
+                    reason: "课程名称不能为空".to_string(),
+                });
+                continue;
+            }
+
+            if item.name.len() > 255 {
+                fail_count += 1;
+                failed_items.push(FailedCourseImportItem {
+                    name: item.name.clone(),
+                    reason: "课程名称不能超过255个字符".to_string(),
+                });
+                continue;
+            }
+
+            if let Some(ref semester) = item.semester {
+                if semester.len() > 50 {
+                    fail_count += 1;
+                    failed_items.push(FailedCourseImportItem {
+                        name: item.name.clone(),
+                        reason: "开课学期不能超过50个字符".to_string(),
+                    });
+                    continue;
+                }
+            }
+
+            if let Some(credits) = item.credits {
+                if credits < 0.0 || credits > 100.0 {
+                    fail_count += 1;
+                    failed_items.push(FailedCourseImportItem {
+                        name: item.name.clone(),
+                        reason: "学分必须在0-100之间".to_string(),
+                    });
+                    continue;
+                }
+            }
+
+            // 检查是否已存在同名课程
+            let existing: Option<(i64,)> = sqlx::query_as(
+                "SELECT sn FROM courses WHERE name = $1 LIMIT 1"
+            )
+            .bind(&item.name)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| CourseError::DatabaseError(e.to_string()))?;
+
+            if existing.is_some() {
+                fail_count += 1;
+                failed_items.push(FailedCourseImportItem {
+                    name: item.name.clone(),
+                    reason: "课程名称已存在".to_string(),
+                });
+                continue;
+            }
+
+            // 插入课程
+            let result = sqlx::query(
+                r#"
+                INSERT INTO courses (name, semester, credits, is_active)
+                VALUES ($1, $2, $3, true)
+                "#
+            )
+            .bind(&item.name)
+            .bind(&item.semester)
+            .bind(item.credits)
+            .execute(pool)
+            .await;
+
+            match result {
+                Ok(_) => {
+                    success_count += 1;
+                }
+                Err(e) => {
+                    fail_count += 1;
+                    failed_items.push(FailedCourseImportItem {
+                        name: item.name.clone(),
+                        reason: format!("数据库错误: {}", e),
+                    });
+                }
+            }
+        }
+
+        Ok(BatchImportCoursesResult {
+            success_count,
+            fail_count,
+            failed_items,
+        })
     }
 }
