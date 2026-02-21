@@ -65,9 +65,21 @@ request.interceptors.request.use(
 // 自定义错误类型，用于标记错误是否已被处理
 class ApiError extends Error {
   isHandled: boolean;
-  constructor(message: string, isHandled: boolean = false) {
+  status?: number;
+  constructor(message: string, isHandled: boolean = false, status?: number) {
     super(message);
     this.isHandled = isHandled;
+    this.status = status;
+  }
+}
+
+// 业务错误类型，用于区分需要特殊处理的错误
+export class BusinessError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+    this.name = 'BusinessError';
   }
 }
 
@@ -93,6 +105,10 @@ request.interceptors.response.use(
 
       switch (status) {
         case 400:
+          // 如果标记为跳过错误处理，静默处理
+          if ((config as any)?.skipErrorHandler) {
+            return Promise.reject(new BusinessError(message, 400));
+          }
           ElMessage.error(message);
           break;
         case 401:
@@ -145,6 +161,10 @@ request.interceptors.response.use(
           }
           break;
         case 409:
+          // 如果标记为跳过错误处理，静默处理
+          if ((config as any)?.skipErrorHandler) {
+            return Promise.reject(new BusinessError(message, 409));
+          }
           ElMessage.error(message); // 如"用户名已存在"
           break;
         case 422:

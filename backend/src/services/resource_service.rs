@@ -13,6 +13,7 @@ pub enum ResourceError {
     ValidationError(String),
     Unauthorized(String),
     AiError(String),
+    Conflict(String), // 资源冲突（如：资源已存在）
 }
 
 impl std::fmt::Display for ResourceError {
@@ -24,6 +25,7 @@ impl std::fmt::Display for ResourceError {
             ResourceError::ValidationError(msg) => write!(f, "验证错误: {}", msg),
             ResourceError::Unauthorized(msg) => write!(f, "未授权: {}", msg),
             ResourceError::AiError(msg) => write!(f, "AI 错误: {}", msg),
+            ResourceError::Conflict(msg) => write!(f, "资源冲突: {}", msg),
         }
     }
 }

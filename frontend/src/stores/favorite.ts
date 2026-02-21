@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { Favorite, FavoriteDetail } from '../types/favorite';
 import * as favoriteApi from '../api/favorite';
+import request from '../api/request';
 
 export const useFavoriteStore = defineStore('favorite', () => {
   // State
@@ -116,10 +117,21 @@ export const useFavoriteStore = defineStore('favorite', () => {
 
   /**
    * 添加资源到收藏夹
+   * @param favoriteId 收藏夹ID
+   * @param resourceId 资源ID
+   * @returns 是否成功添加（如果资源已存在返回false）
+   * @throws 非业务错误（如网络错误）会抛出异常
    */
-  const addResourceToFavorite = async (favoriteId: string, resourceId: string) => {
+  const addResourceToFavorite = async (favoriteId: string, resourceId: string): Promise<boolean> => {
     try {
-      await favoriteApi.addToFavorite(favoriteId, { resourceId });
+      // 使用原始request调用，添加skipErrorHandler标记让拦截器不显示弹窗
+      await request({
+        url: `/favorites/${favoriteId}/resources`,
+        method: 'post',
+        data: { resourceId },
+        skipErrorHandler: true, // 标记跳过错误处理，由调用方处理
+      } as any);
+
       // 更新本地收藏夹计数
       const favorite = favorites.value.find(f => f.id === favoriteId);
       if (favorite) {
@@ -129,7 +141,14 @@ export const useFavoriteStore = defineStore('favorite', () => {
       if (currentFavorite.value?.id === favoriteId) {
         await fetchFavoriteDetail(favoriteId);
       }
-    } catch (err) {
+
+      return true; // 添加成功
+    } catch (err: any) {
+      // 检查是否是资源已存在的错误（409状态码）
+      if (err.status === 409 || err.response?.status === 409) {
+        return false; // 资源已存在，返回false但不抛出错误
+      }
+      // 其他错误继续抛出
       throw err;
     }
   };

@@ -360,7 +360,7 @@ impl FavoriteService {
         .await?;
 
         if already_in {
-            return Err(ResourceError::ValidationError(
+            return Err(ResourceError::Conflict(
                 "资源已在收藏夹中".to_string(),
             ));
         }

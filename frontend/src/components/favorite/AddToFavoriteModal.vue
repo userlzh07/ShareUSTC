@@ -147,14 +147,21 @@ const toggleFavorite = async (favoriteId: string) => {
       selectedFavorites.value.delete(favoriteId);
       ElMessage.success('已从收藏夹移除');
     } else {
-      // 添加到收藏夹（store 方法内部已调用 API 并更新计数）
-      await favoriteStore.addResourceToFavorite(favoriteId, props.resourceId);
-      selectedFavorites.value.add(favoriteId);
-      ElMessage.success('已添加到收藏夹');
+      // 添加到收藏夹
+      const added = await favoriteStore.addResourceToFavorite(favoriteId, props.resourceId);
+      if (added) {
+        selectedFavorites.value.add(favoriteId);
+        ElMessage.success('已添加到收藏夹');
+      } else {
+        // 资源已存在
+        selectedFavorites.value.add(favoriteId);
+        ElMessage.warning('该资源已在收藏夹中');
+      }
     }
     emit('success');
   } catch (error: any) {
-    ElMessage.error(error.message || '操作失败');
+    const errorMessage = error.response?.data?.message || error.message || '操作失败';
+    ElMessage.error(errorMessage);
   }
 };
 
@@ -172,12 +179,18 @@ const handleCreateNew = async () => {
     const response = await favoriteStore.createFavorite(name);
     newFavoriteName.value = '';
 
-    // 2. 自动添加到新创建的收藏夹（store 方法内部已调用 API 并更新计数）
+    // 2. 自动添加到新创建的收藏夹
     if (response?.id) {
-      await favoriteStore.addResourceToFavorite(response.id, props.resourceId);
-      selectedFavorites.value.add(response.id);
-      emit('success');
-      ElMessage.success('创建成功并已添加到收藏夹');
+      const added = await favoriteStore.addResourceToFavorite(response.id, props.resourceId);
+      if (added) {
+        selectedFavorites.value.add(response.id);
+        emit('success');
+        ElMessage.success('创建成功并已添加到收藏夹');
+      } else {
+        selectedFavorites.value.add(response.id);
+        emit('success');
+        ElMessage.warning('创建成功，但该资源已在收藏夹中');
+      }
     } else {
       ElMessage.success('创建成功');
     }

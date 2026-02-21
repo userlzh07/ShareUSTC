@@ -93,6 +93,59 @@
           <el-option label="标题降序" value="title" />
         </el-select>
       </div>
+
+      <!-- 批量收藏控制区（仅登录用户显示） -->
+      <div v-if="authStore.isAuthenticated" class="quick-add-section">
+        <div class="quick-add-row">
+          <div class="switch-label" :class="{ active: !enableQuickAdd }">点击查看资源</div>
+          <el-switch
+            v-model="enableQuickAdd"
+            @change="(val: boolean) => { if (!val) { favoriteLocked = false; selectedFavoriteId = ''; } }"
+          />
+          <div class="switch-label" :class="{ active: enableQuickAdd }">点击加入收藏夹</div>
+
+          <div v-if="enableQuickAdd" class="favorite-selector">
+            <el-select
+              v-model="selectedFavoriteId"
+              placeholder="选择收藏夹"
+              class="favorite-select"
+              :disabled="favoriteLocked"
+              :loading="favoriteStore.loading"
+            >
+              <el-option
+                v-for="favorite in favoritesWithCount"
+                :key="favorite.id"
+                :label="`${favorite.name} (${favorite.resourceCount})`"
+                :value="favorite.id"
+              />
+            </el-select>
+
+            <el-button
+              v-if="!favoriteLocked && selectedFavoriteId"
+              type="primary"
+              @click="handleSelectFavorite"
+            >
+              选择收藏夹
+            </el-button>
+
+            <el-button
+              v-if="favoriteLocked"
+              @click="handleChangeFavorite"
+            >
+              重新选择
+            </el-button>
+          </div>
+        </div>
+
+        <div v-if="enableQuickAdd" class="quick-add-hint">
+          <el-alert
+            :title="favoriteLocked ? '左键点击资源卡片即可加入收藏夹' : '请先选择收藏夹并点击「选择收藏夹」按钮锁定'"
+            :type="favoriteLocked ? 'success' : 'info'"
+            :closable="false"
+            show-icon
+          />
+        </div>
+      </div>
     </el-card>
 
     <!-- 资源列表 -->
@@ -116,9 +169,14 @@
         :key="resource.id"
         :href="`/resources/${resource.id}`"
         class="resource-card-link"
-        @click.prevent="goToDetail(resource.id)"
+        :class="{ 'quick-add-mode': enableQuickAdd, 'adding': addingResourceId === resource.id }"
+        @click.prevent="handleResourceCardClick(resource)"
       >
         <el-card class="resource-card" shadow="hover">
+          <!-- 批量添加状态遮罩 -->
+          <div v-if="addingResourceId === resource.id" class="adding-overlay">
+            <el-icon class="adding-icon"><Loading /></el-icon>
+          </div>
           <div class="resource-header">
             <el-tag size="small" :type="getResourceTypeTagType(resource.resourceType)">
               {{ ResourceTypeLabels[resource.resourceType as keyof typeof ResourceTypeLabels] || resource.resourceType }}
@@ -208,9 +266,14 @@ import {
 } from '../../types/resource';
 import type { Teacher } from '../../types/teacher';
 import type { Course } from '../../types/course';
+import { useFavoriteStore } from '../../stores/favorite';
+import { useAuthStore } from '../../stores/auth';
+import type { Favorite } from '../../types/favorite';
 
 const router = useRouter();
 const route = useRoute();
+const favoriteStore = useFavoriteStore();
+const authStore = useAuthStore();
 
 // 状态
 const loading = ref(false);
@@ -235,6 +298,78 @@ const loadingCourses = ref(false);
 
 // 是否在搜索模式
 const isSearchMode = computed(() => searchQuery.value.trim().length > 0);
+
+// 批量收藏功能状态
+const enableQuickAdd = ref(false);
+const selectedFavoriteId = ref<string>('');
+const favoriteLocked = ref(false);
+const addingResourceId = ref<string | null>(null);
+
+// 收藏夹列表（带实时数量）
+const favoritesWithCount = ref<Favorite[]>([]);
+
+// 加载收藏夹列表
+const loadFavorites = async () => {
+  if (!authStore.isAuthenticated) return;
+  try {
+    await favoriteStore.fetchFavorites();
+    favoritesWithCount.value = favoriteStore.favorites;
+  } catch (error) {
+    console.error('加载收藏夹失败:', error);
+  }
+};
+
+// 获取选中的收藏夹信息
+const selectedFavorite = computed(() => {
+  return favoritesWithCount.value.find(f => f.id === selectedFavoriteId.value);
+});
+
+// 处理收藏夹选择确认
+const handleSelectFavorite = () => {
+  if (selectedFavoriteId.value) {
+    favoriteLocked.value = true;
+  }
+};
+
+// 重新选择收藏夹
+const handleChangeFavorite = () => {
+  favoriteLocked.value = false;
+};
+
+// 处理资源卡片点击（批量收藏模式）
+const handleResourceCardClick = async (resource: ResourceListItem) => {
+  if (!enableQuickAdd.value) {
+    // 正常模式：跳转到详情页
+    router.push(`/resources/${resource.id}`);
+    return;
+  }
+
+  // 批量收藏模式
+  if (!selectedFavoriteId.value) {
+    ElMessage.warning('请先选择收藏夹');
+    return;
+  }
+
+  if (addingResourceId.value) return; // 防止重复点击
+
+  addingResourceId.value = resource.id;
+  try {
+    const added = await favoriteStore.addResourceToFavorite(selectedFavoriteId.value, resource.id);
+
+    if (added) {
+      ElMessage.success(`已加入收藏夹: ${selectedFavorite.value?.name}`);
+    } else {
+      // 资源已存在，显示黄色提示
+      ElMessage.warning('该资源已在收藏夹中');
+    }
+  } catch (error: any) {
+    // 只有非业务错误才显示错误弹窗
+    const errorMessage = error.response?.data?.message || error.message || '添加失败';
+    ElMessage.error(errorMessage);
+  } finally {
+    addingResourceId.value = null;
+  }
+};
 
 // 获取资源类型标签类型
 const getResourceTypeTagType = (type: string) => {
@@ -381,11 +516,6 @@ const goToUpload = () => {
   router.push('/upload');
 };
 
-// 跳转到详情页
-const goToDetail = (id: string) => {
-  router.push(`/resources/${id}`);
-};
-
 // 监听筛选条件变化
 watch([filterType, filterCategory, sortBy, filterTeacherSns, filterCourseSns], () => {
   currentPage.value = 1;
@@ -402,6 +532,7 @@ onMounted(() => {
   loadResources();
   loadTeachers();
   loadCourses();
+  loadFavorites();
 });
 </script>
 
@@ -451,6 +582,79 @@ onMounted(() => {
 
 .filter-item {
   width: 180px;
+}
+
+/* 批量收藏控制区样式 */
+.quick-add-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--el-border-color);
+}
+
+.quick-add-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.switch-label {
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+  transition: color 0.3s;
+}
+
+.switch-label.active {
+  color: var(--el-text-color-primary);
+  font-weight: 500;
+}
+
+.favorite-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.favorite-select {
+  width: 220px;
+}
+
+.quick-add-hint {
+  margin-top: 12px;
+}
+
+/* 批量添加模式下的卡片样式 */
+.resource-card-link.quick-add-mode {
+  cursor: pointer;
+}
+
+.resource-card-link.quick-add-mode:hover .resource-card {
+  border-color: var(--el-color-success);
+  box-shadow: 0 0 0 2px var(--el-color-success-light-8);
+}
+
+.resource-card-link.adding {
+  pointer-events: none;
+}
+
+.adding-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.adding-icon {
+  font-size: 32px;
+  color: var(--el-color-primary);
+  animation: spin 1s linear infinite;
 }
 
 /* 加载中遮罩层样式 */
@@ -520,6 +724,7 @@ onMounted(() => {
   text-decoration: none;
   color: inherit;
   display: block;
+  position: relative;
 }
 
 .resource-card {
@@ -528,6 +733,7 @@ onMounted(() => {
   height: 240px;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .resource-card-link:hover .resource-card {

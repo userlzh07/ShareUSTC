@@ -173,6 +173,13 @@
         <h2>更新日志</h2>
         <div class="changelog-list">
           <div class="changelog-item">
+            <div class="changelog-date">2026-02-21</div>
+            <div class="changelog-content">
+              <span class="changelog-tag tag-feature">新增功能</span>
+              <span class="changelog-text">新增设置默认收藏夹、一键加入收藏夹的功能</span>
+            </div>
+          </div>
+          <div class="changelog-item">
             <div class="changelog-date">2026-02-20</div>
             <div class="changelog-content">
               <span class="changelog-tag tag-improve">功能优化</span>

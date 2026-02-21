@@ -12,7 +12,7 @@ use crate::services::{
     AuditLogService, CommentService, LikeService, RatingService, ResourceError, ResourceService,
     StorageBackendType, StorageError,
 };
-use crate::utils::{bad_request, forbidden, internal_error, not_found};
+use crate::utils::{bad_request, conflict, forbidden, internal_error, not_found};
 
 /// 上传资源
 #[post("/resources")]
@@ -175,6 +175,7 @@ pub async fn upload_resource(
                 ResourceError::AiError(msg) => internal_error(&msg),
                 ResourceError::NotFound(msg) => not_found(&msg),
                 ResourceError::Unauthorized(msg) => forbidden(&msg),
+                ResourceError::Conflict(msg) => conflict(&msg),
             }
         }
     }

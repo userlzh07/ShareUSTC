@@ -512,17 +512,20 @@ const addToDefaultFavorite = async () => {
 
   addingToDefault.value = true;
   try {
-    await favoriteStore.addResourceToFavorite(defaultFavoriteId.value, resourceId.value);
-    isInDefaultFavorite.value = true;
-    ElMessage.success(`已添加到默认收藏夹: ${defaultFavoriteName.value}`);
-  } catch (error: any) {
-    // 检查是否是重复添加的错误
-    if (error.response?.status === 409 || error.message?.includes('already exists') || error.message?.includes('已存在')) {
+    const added = await favoriteStore.addResourceToFavorite(defaultFavoriteId.value, resourceId.value);
+
+    if (added) {
       isInDefaultFavorite.value = true;
-      ElMessage.info('该资源已在默认收藏夹中');
+      ElMessage.success(`已添加到默认收藏夹: ${defaultFavoriteName.value}`);
     } else {
-      ElMessage.error(error.message || '添加到默认收藏夹失败');
+      // 资源已存在
+      isInDefaultFavorite.value = true;
+      ElMessage.warning('该资源已在默认收藏夹中');
     }
+  } catch (error: any) {
+    // 只有非业务错误才显示错误弹窗
+    const errorMessage = error.response?.data?.message || error.message || '添加到默认收藏夹失败';
+    ElMessage.error(errorMessage);
   } finally {
     addingToDefault.value = false;
   }

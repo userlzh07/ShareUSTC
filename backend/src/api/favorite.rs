@@ -7,7 +7,7 @@ use crate::models::{
     AddToFavoriteRequest, CreateFavoriteRequest, CurrentUser, UpdateFavoriteRequest,
 };
 use crate::services::{FavoriteService, ResourceError};
-use crate::utils::{bad_request, forbidden, internal_error, not_found};
+use crate::utils::{bad_request, conflict, forbidden, internal_error, not_found};
 
 /// 对文件名进行 RFC 5987 编码，用于支持中文等非 ASCII 字符
 /// 参考: https://datatracker.ietf.org/doc/html/rfc5987
@@ -276,6 +276,7 @@ pub async fn add_resource_to_favorite(
                 ResourceError::ValidationError(msg) => bad_request(&msg),
                 ResourceError::NotFound(msg) => not_found(&msg),
                 ResourceError::Unauthorized(msg) => forbidden(&msg),
+                ResourceError::Conflict(msg) => conflict(&msg),
                 _ => internal_error("添加失败"),
             }
         }
