@@ -1,7 +1,10 @@
 <template>
   <nav class="navbar">
     <div class="nav-brand">
-      <h1 @click="$router.push('/')" style="cursor: pointer;">ShareUSTC</h1>
+      <h1 @click="$router.push('/')" style="cursor: pointer;">
+        ShareUSTC
+        <span v-if="isDevMode" class="dev-badge">开发版</span>
+      </h1>
     </div>
     <div class="nav-links">
       <router-link to="/">首页</router-link>
@@ -42,9 +45,13 @@ import { useAuthStore } from '../stores/auth';
 import { ArrowDown } from '@element-plus/icons-vue';
 import { ElMessageBox } from 'element-plus';
 import NotificationBell from './notification/NotificationBell.vue';
+import { computed } from 'vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
+
+// 是否显示开发版提示
+const isDevMode = computed(() => import.meta.env.VITE_DEV_MODE === 'true');
 
 const handleCommand = async (command: string) => {
   if (command === 'logout') {
@@ -133,5 +140,17 @@ const handleCommand = async (command: string) => {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.dev-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: normal;
+  color: #fff;
+  background-color: #e6a23c;
+  border-radius: 4px;
+  vertical-align: middle;
 }
 </style>
