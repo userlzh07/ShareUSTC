@@ -111,67 +111,69 @@
     </div>
 
     <div v-else class="resource-grid">
-      <el-card
+      <a
         v-for="resource in resources"
         :key="resource.id"
-        class="resource-card"
-        shadow="hover"
-        @click="goToDetail(resource.id)"
+        :href="`/resources/${resource.id}`"
+        class="resource-card-link"
+        @click.prevent="goToDetail(resource.id)"
       >
-        <div class="resource-header">
-          <el-tag size="small" :type="getResourceTypeTagType(resource.resourceType)">
-            {{ ResourceTypeLabels[resource.resourceType as keyof typeof ResourceTypeLabels] || resource.resourceType }}
-          </el-tag>
-          <el-tag size="small" type="info">
-            {{ ResourceCategoryLabels[resource.category as ResourceCategoryType] || resource.category }}
-          </el-tag>
-        </div>
-
-        <h3 class="resource-title">{{ resource.title }}</h3>
-
-        <p class="resource-course">
-          <template v-if="resource.courseName">
-            <el-icon><Reading /></el-icon>
-            {{ resource.courseName }}
-          </template>
-          <span v-else class="placeholder">&nbsp;</span>
-        </p>
-
-        <div class="resource-tags">
-          <template v-if="resource.tags && resource.tags.length > 0">
-            <el-tag
-              v-for="tag in resource.tags.slice(0, 3)"
-              :key="tag"
-              size="small"
-              effect="plain"
-            >
-              {{ tag }}
+        <el-card class="resource-card" shadow="hover">
+          <div class="resource-header">
+            <el-tag size="small" :type="getResourceTypeTagType(resource.resourceType)">
+              {{ ResourceTypeLabels[resource.resourceType as keyof typeof ResourceTypeLabels] || resource.resourceType }}
             </el-tag>
-            <span v-if="resource.tags.length > 3" class="more-tags">+{{ resource.tags.length - 3 }}</span>
-          </template>
-          <span v-else class="placeholder">&nbsp;</span>
-        </div>
+            <el-tag size="small" type="info">
+              {{ ResourceCategoryLabels[resource.category as ResourceCategoryType] || resource.category }}
+            </el-tag>
+          </div>
 
-        <div class="resource-stats">
-          <span class="stat-item">
-            <el-icon><View /></el-icon>
-            {{ resource.stats.views }}
-          </span>
-          <span class="stat-item">
-            <el-icon><Download /></el-icon>
-            {{ resource.stats.downloads }}
-          </span>
-          <span class="stat-item">
-            <el-icon><Star /></el-icon>
-            {{ resource.stats.likes }}
-          </span>
-        </div>
+          <h3 class="resource-title">{{ resource.title }}</h3>
 
-        <div class="resource-footer">
-          <span class="uploader">{{ resource.uploaderName || '未知用户' }}</span>
-          <span class="upload-time">{{ formatTime(resource.createdAt) }}</span>
-        </div>
-      </el-card>
+          <p class="resource-course">
+            <template v-if="resource.courseName">
+              <el-icon><Reading /></el-icon>
+              {{ resource.courseName }}
+            </template>
+            <span v-else class="placeholder">&nbsp;</span>
+          </p>
+
+          <div class="resource-tags">
+            <template v-if="resource.tags && resource.tags.length > 0">
+              <el-tag
+                v-for="tag in resource.tags.slice(0, 3)"
+                :key="tag"
+                size="small"
+                effect="plain"
+              >
+                {{ tag }}
+              </el-tag>
+              <span v-if="resource.tags.length > 3" class="more-tags">+{{ resource.tags.length - 3 }}</span>
+            </template>
+            <span v-else class="placeholder">&nbsp;</span>
+          </div>
+
+          <div class="resource-stats">
+            <span class="stat-item">
+              <el-icon><View /></el-icon>
+              {{ resource.stats.views }}
+            </span>
+            <span class="stat-item">
+              <el-icon><Download /></el-icon>
+              {{ resource.stats.downloads }}
+            </span>
+            <span class="stat-item">
+              <el-icon><Star /></el-icon>
+              {{ resource.stats.likes }}
+            </span>
+          </div>
+
+          <div class="resource-footer">
+            <span class="uploader">{{ resource.uploaderName || '未知用户' }}</span>
+            <span class="upload-time">{{ formatTime(resource.createdAt) }}</span>
+          </div>
+        </el-card>
+      </a>
     </div>
 
     <!-- 分页 -->
@@ -514,6 +516,12 @@ onMounted(() => {
   margin-bottom: 32px;
 }
 
+.resource-card-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
 .resource-card {
   cursor: pointer;
   transition: all 0.3s;
@@ -522,7 +530,7 @@ onMounted(() => {
   flex-direction: column;
 }
 
-.resource-card:hover {
+.resource-card-link:hover .resource-card {
   transform: translateY(-4px);
 }
 

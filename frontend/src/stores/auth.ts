@@ -11,6 +11,7 @@ import type {
 import { UserRole } from '../types/auth';
 import { ElMessage } from 'element-plus';
 import logger from '../utils/logger';
+import { clearDefaultFavoriteStorage } from '../composables/useDefaultFavorite';
 
 export const useAuthStore = defineStore('auth', () => {
   // State
@@ -167,6 +168,8 @@ export const useAuthStore = defineStore('auth', () => {
   const clearAuth = () => {
     user.value = null;
     accessToken.value = null;
+    // 清除默认收藏夹设置
+    clearDefaultFavoriteStorage();
   };
 
   // 更新用户信息（用于资料修改后同步）

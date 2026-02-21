@@ -11,6 +11,7 @@
         <router-link to="/upload">上传</router-link>
         <router-link to="/image-host">图床</router-link>
         <router-link to="/favorites">收藏夹</router-link>
+        <router-link to="/settings">设置</router-link>
         <router-link to="/profile">个人中心</router-link>
         <router-link v-if="authStore.isAdmin" to="/admin" class="admin-link">管理后台</router-link>
         <NotificationBell />
@@ -27,6 +28,7 @@
         </el-dropdown>
       </template>
       <template v-else>
+        <router-link to="/settings">设置</router-link>
         <router-link to="/login">登录</router-link>
         <router-link to="/register" class="register-btn">注册</router-link>
       </template>

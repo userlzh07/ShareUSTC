@@ -11,9 +11,11 @@
       :model="form"
       :rules="rules"
       label-position="top"
+      @submit.prevent="handleSubmit"
     >
       <el-form-item label="收藏夹名称" prop="name">
         <el-input
+          ref="inputRef"
           v-model="form.name"
           placeholder="请输入收藏夹名称"
           maxlength="100"
@@ -59,8 +61,24 @@ const visible = ref(props.modelValue);
 // 监听 modelValue 变化
 watch(() => props.modelValue, (newVal) => {
   visible.value = newVal;
-  if (newVal && props.favorite) {
-    form.value.name = props.favorite.name;
+  if (newVal) {
+    // 先清空表单数据
+    form.value.name = '';
+
+    // 如果是编辑模式，设置表单名称
+    if (props.favorite) {
+      form.value.name = props.favorite.name;
+    }
+
+    // 弹窗打开时自动聚焦输入框，使用 setTimeout 等待 Dialog 动画完成
+    setTimeout(() => {
+      // 清空验证状态（在聚焦之前）
+      if (formRef.value) {
+        formRef.value.clearValidate();
+      }
+      // 聚焦输入框
+      inputRef.value?.input?.focus();
+    }, 100);
   }
 });
 
@@ -71,6 +89,7 @@ watch(() => visible.value, (newVal) => {
 
 // 表单
 const formRef = ref<FormInstance>();
+const inputRef = ref<any>(null);
 const form = ref({
   name: ''
 });

@@ -56,6 +56,25 @@
                 收藏
               </el-button>
 
+              <!-- 收藏至默认收藏夹 -->
+              <el-tooltip
+                v-if="authStore.isAuthenticated"
+                :content="tooltipContent"
+                placement="bottom"
+              >
+                <el-button
+                  v-if="authStore.isAuthenticated"
+                  size="large"
+                  :type="defaultFavoriteButtonType"
+                  :disabled="!hasDefaultFavorite || isInDefaultFavorite"
+                  :loading="addingToDefault || checkingDefaultStatus"
+                  @click="addToDefaultFavorite"
+                >
+                  <el-icon><Star /></el-icon>
+                  {{ defaultFavoriteButtonText }}
+                </el-button>
+              </el-tooltip>
+
               <el-button v-if="canEdit" size="large" type="success" @click="handleEdit">
                 <el-icon><Edit /></el-icon>
                 编辑
@@ -244,7 +263,10 @@ import {
   User
 } from '@element-plus/icons-vue';
 import { getResourceDetail, downloadResource, deleteResource } from '../../api/resource';
+import { checkResourceInFavorite } from '../../api/favorite';
 import { useAuthStore } from '../../stores/auth';
+import { useFavoriteStore } from '../../stores/favorite';
+import { useDefaultFavorite } from '../../composables/useDefaultFavorite';
 import PreviewSwitch from '../../components/preview/PreviewSwitch.vue';
 import LikeButton from '../../components/interaction/LikeButton.vue';
 import CommentSection from '../../components/interaction/CommentSection.vue';
@@ -263,15 +285,40 @@ import type { ResourceRatingInfo } from '../../types/rating';
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
+const favoriteStore = useFavoriteStore();
+const { hasDefaultFavorite, defaultFavoriteId, defaultFavoriteName } = useDefaultFavorite();
 
 // 状态
 const loading = ref(true);
 const downloading = ref(false);
 const resource = ref<ResourceDetail | null>(null);
 const showAddToFavorite = ref(false);
+const addingToDefault = ref(false);
+const isInDefaultFavorite = ref(false); // 资源是否已在默认收藏夹中
+const checkingDefaultStatus = ref(false); // 正在检查默认收藏夹状态
 
 // 计算属性
 const resourceId = computed(() => route.params.id as string);
+
+// 默认收藏夹按钮类型
+const defaultFavoriteButtonType = computed(() => {
+  if (!hasDefaultFavorite.value) return 'info';
+  if (isInDefaultFavorite.value) return 'primary';
+  return ''; // 默认样式，和"收藏"按钮一样
+});
+
+// 默认收藏夹按钮文本
+const defaultFavoriteButtonText = computed(() => {
+  if (isInDefaultFavorite.value) return '已加入默认收藏夹';
+  return '收藏至默认收藏夹';
+});
+
+// 默认收藏夹按钮 tooltip 内容
+const tooltipContent = computed(() => {
+  if (!hasDefaultFavorite.value) return '请在收藏夹页面设置默认收藏夹';
+  if (isInDefaultFavorite.value) return `已加入默认收藏夹: ${defaultFavoriteName.value}`;
+  return `收藏至默认收藏夹: ${defaultFavoriteName.value}`;
+});
 
 const canDelete = computed(() => {
   if (!resource.value || !authStore.user) return false;
@@ -329,7 +376,26 @@ const onLikeUpdate = (_isLiked: boolean, count: number) => {
 
 // 添加到收藏夹成功回调
 const onAddToFavoriteSuccess = () => {
-  // 可以在这里添加一些UI反馈，比如显示资源已被收藏的提示
+  // 重新检查资源是否在默认收藏夹中，同步"收藏至默认收藏夹"按钮状态
+  checkDefaultFavoriteStatus();
+};
+
+// 检查资源是否在默认收藏夹中
+const checkDefaultFavoriteStatus = async () => {
+  if (!hasDefaultFavorite.value || !defaultFavoriteId.value) {
+    isInDefaultFavorite.value = false;
+    return;
+  }
+
+  checkingDefaultStatus.value = true;
+  try {
+    const result = await checkResourceInFavorite(resourceId.value);
+    isInDefaultFavorite.value = result.inFavorites.includes(defaultFavoriteId.value);
+  } catch {
+    isInDefaultFavorite.value = false;
+  } finally {
+    checkingDefaultStatus.value = false;
+  }
 };
 
 // 评分更新回调
@@ -351,6 +417,10 @@ const loadResourceDetail = async () => {
   try {
     const response = await getResourceDetail(resourceId.value);
     resource.value = response;
+    // 加载完成后检查资源是否在默认收藏夹中
+    if (authStore.isAuthenticated) {
+      await checkDefaultFavoriteStatus();
+    }
   } catch (error: any) {
     if (!error.isHandled) {
       ElMessage.error(error.message || '加载资源详情失败');
@@ -426,6 +496,36 @@ const goToUploaderHomepage = () => {
 // 编辑资源
 const handleEdit = () => {
   router.push(`/resources/${resourceId.value}/edit`);
+};
+
+// 添加到默认收藏夹
+const addToDefaultFavorite = async () => {
+  if (!hasDefaultFavorite.value || !defaultFavoriteId.value) {
+    ElMessage.warning('请先设置默认收藏夹');
+    return;
+  }
+
+  // 如果已经在默认收藏夹中，不需要重复添加
+  if (isInDefaultFavorite.value) {
+    return;
+  }
+
+  addingToDefault.value = true;
+  try {
+    await favoriteStore.addResourceToFavorite(defaultFavoriteId.value, resourceId.value);
+    isInDefaultFavorite.value = true;
+    ElMessage.success(`已添加到默认收藏夹: ${defaultFavoriteName.value}`);
+  } catch (error: any) {
+    // 检查是否是重复添加的错误
+    if (error.response?.status === 409 || error.message?.includes('already exists') || error.message?.includes('已存在')) {
+      isInDefaultFavorite.value = true;
+      ElMessage.info('该资源已在默认收藏夹中');
+    } else {
+      ElMessage.error(error.message || '添加到默认收藏夹失败');
+    }
+  } finally {
+    addingToDefault.value = false;
+  }
 };
 
 // 页面加载时获取资源详情

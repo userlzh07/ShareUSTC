@@ -48,12 +48,26 @@
           </div>
         </div>
         <div class="favorite-actions" @click.stop>
+          <!-- 默认收藏夹标记 -->
+          <el-tag
+            v-if="isDefaultFavorite(favorite.id)"
+            type="success"
+            size="small"
+            class="default-tag"
+          >
+            <el-icon><StarFilled /></el-icon>
+            默认
+          </el-tag>
           <el-dropdown trigger="click">
             <el-button type="primary" text>
               <el-icon><More /></el-icon>
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item @click="handleSetDefault(favorite)">
+                  <el-icon><Star /></el-icon>
+                  {{ isDefaultFavorite(favorite.id) ? '取消默认' : '设为默认' }}
+                </el-dropdown-item>
                 <el-dropdown-item @click="handleEdit(favorite)">
                   <el-icon><Edit /></el-icon>
                   重命名
@@ -96,15 +110,19 @@ import {
   More,
   Edit,
   Delete,
-  Loading
+  Loading,
+  Star,
+  StarFilled
 } from '@element-plus/icons-vue';
 import { storeToRefs } from 'pinia';
 import { useFavoriteStore } from '../../stores/favorite';
 import type { Favorite } from '../../types/favorite';
 import CreateFavoriteModal from '../../components/favorite/CreateFavoriteModal.vue';
+import { useDefaultFavorite } from '../../composables/useDefaultFavorite';
 
 const router = useRouter();
 const favoriteStore = useFavoriteStore();
+const { setDefaultFavorite, isDefaultFavorite, clearDefaultFavorite } = useDefaultFavorite();
 
 // 状态
 const loading = ref(false);
@@ -164,6 +182,12 @@ const handleDelete = async (favorite: Favorite) => {
     );
 
     await favoriteStore.deleteFavorite(favorite.id);
+
+    // 如果删除的是默认收藏夹，清除默认收藏夹设置
+    if (isDefaultFavorite(favorite.id)) {
+      clearDefaultFavorite();
+    }
+
     ElMessage.success('删除成功');
   } catch (error: any) {
     if (error !== 'cancel') {
@@ -183,6 +207,19 @@ const handleEditSuccess = () => {
   showEditModal.value = false;
   editingFavorite.value = null;
   ElMessage.success('更新成功');
+};
+
+// 设置/取消默认收藏夹
+const handleSetDefault = async (favorite: Favorite) => {
+  if (isDefaultFavorite(favorite.id)) {
+    // 取消默认
+    setDefaultFavorite('', '');
+    ElMessage.success('已取消默认收藏夹');
+  } else {
+    // 设为默认
+    setDefaultFavorite(favorite.id, favorite.name);
+    ElMessage.success(`已将 "${favorite.name}" 设为默认收藏夹`);
+  }
 };
 
 // 页面加载时获取数据
@@ -294,6 +331,24 @@ onMounted(() => {
   position: absolute;
   top: 10px;
   right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.default-tag {
+  display: inline-flex !important;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0 6px;
+  height: 24px;
+
+  :deep(.el-tag__content) {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
 }
 
 @media (max-width: 768px) {

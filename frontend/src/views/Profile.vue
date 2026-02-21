@@ -28,10 +28,6 @@
             <el-icon><Document /></el-icon>
             <span>我的资源</span>
           </el-menu-item>
-          <el-menu-item index="cache">
-            <el-icon><Collection /></el-icon>
-            <span>缓存管理</span>
-          </el-menu-item>
           <el-menu-item index="settings">
             <el-icon><Setting /></el-icon>
             <span>账号设置</span>
@@ -300,14 +296,6 @@
 
         </div>
 
-        <!-- 缓存管理页面 -->
-        <div v-if="activeMenu === 'cache'" class="content-section">
-          <div class="section-header">
-            <h2>缓存管理</h2>
-          </div>
-          <CacheManager />
-        </div>
-
         <!-- 实名认证页面 -->
         <div v-if="activeMenu === 'verification'" class="content-section">
           <h2>实名认证</h2>
@@ -376,7 +364,6 @@ import { useAuthStore } from '../stores/auth';
 import logger from '../utils/logger';
 import { getCurrentUser, updateProfile, verifyUser, getUserProfile } from '../api/user';
 import MarkdownEditor from '../components/editor/MarkdownEditor.vue';
-import CacheManager from '../components/common/CacheManager.vue';
 import type { UpdateProfileRequest, VerificationRequest } from '../api/user';
 import { getMyResources, deleteResource } from '../api/resource';
 import type { ResourceListItem } from '../types/resource';
@@ -400,8 +387,7 @@ import {
   Download,
   Star,
   Loading,
-  Link,
-  Collection
+  Link
 } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 

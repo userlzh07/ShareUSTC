@@ -22,6 +22,13 @@
           <el-icon><Edit /></el-icon>
           重命名
         </el-button>
+        <el-button
+          :type="isDefaultFavorite(currentFavorite?.id || '') ? 'success' : 'default'"
+          @click="handleSetDefault"
+        >
+          <el-icon><Star /></el-icon>
+          {{ isDefaultFavorite(currentFavorite?.id || '') ? '取消默认' : '设为默认' }}
+        </el-button>
         <el-button type="primary" @click="handleDownload" :loading="downloading">
           <el-icon><Download /></el-icon>
           打包下载
@@ -53,69 +60,72 @@
 
       <!-- 资源卡片列表 -->
       <div v-else class="resource-grid">
-        <el-card
+        <a
           v-for="resource in resources"
           :key="resource.id"
-          class="resource-card"
-          shadow="hover"
+          :href="`/resources/${resource.id}`"
+          class="resource-card-link"
+          @click.prevent="goToResource(resource.id)"
         >
-          <div class="resource-content" @click="goToResource(resource.id)">
-            <!-- 资源类型图标 -->
-            <div
-              class="resource-type-icon"
-              :style="{ backgroundColor: getResourceTypeColor(resource.resourceType) }"
-            >
-              {{ resource.resourceType.toUpperCase() }}
+          <el-card class="resource-card" shadow="hover">
+            <div class="resource-content">
+              <!-- 资源类型图标 -->
+              <div
+                class="resource-type-icon"
+                :style="{ backgroundColor: getResourceTypeColor(resource.resourceType) }"
+              >
+                {{ resource.resourceType.toUpperCase() }}
+              </div>
+
+              <div class="resource-info">
+                <h4 class="resource-title">{{ resource.title }}</h4>
+                <p v-if="resource.courseName" class="resource-course">
+                  {{ resource.courseName }}
+                </p>
+                <div class="resource-tags" v-if="resource.tags?.length">
+                  <el-tag
+                    v-for="tag in resource.tags.slice(0, 3)"
+                    :key="tag"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ tag }}
+                  </el-tag>
+                </div>
+                <div class="resource-stats">
+                  <span>
+                    <el-icon><View /></el-icon>
+                    {{ resource.stats.views }}
+                  </span>
+                  <span>
+                    <el-icon><Download /></el-icon>
+                    {{ resource.stats.downloads }}
+                  </span>
+                  <span>
+                    <el-icon><Star /></el-icon>
+                    {{ resource.stats.likes }}
+                  </span>
+                </div>
+              </div>
             </div>
 
-            <div class="resource-info">
-              <h4 class="resource-title">{{ resource.title }}</h4>
-              <p v-if="resource.courseName" class="resource-course">
-                {{ resource.courseName }}
-              </p>
-              <div class="resource-tags" v-if="resource.tags?.length">
-                <el-tag
-                  v-for="tag in resource.tags.slice(0, 3)"
-                  :key="tag"
-                  size="small"
-                  effect="plain"
-                >
-                  {{ tag }}
-                </el-tag>
-              </div>
-              <div class="resource-stats">
-                <span>
-                  <el-icon><View /></el-icon>
-                  {{ resource.stats.views }}
-                </span>
-                <span>
-                  <el-icon><Download /></el-icon>
-                  {{ resource.stats.downloads }}
-                </span>
-                <span>
-                  <el-icon><Star /></el-icon>
-                  {{ resource.stats.likes }}
-                </span>
-              </div>
+            <div class="resource-actions" @click.stop.prevent>
+              <el-popconfirm
+                title="确定从收藏夹移除此资源？"
+                confirm-button-text="移除"
+                cancel-button-text="取消"
+                @confirm="removeResource(resource.id)"
+              >
+                <template #reference>
+                  <el-button type="danger" text size="small" @click.stop.prevent>
+                    <el-icon><Remove /></el-icon>
+                    移除
+                  </el-button>
+                </template>
+              </el-popconfirm>
             </div>
-          </div>
-
-          <div class="resource-actions" @click.stop>
-            <el-popconfirm
-              title="确定从收藏夹移除此资源？"
-              confirm-button-text="移除"
-              cancel-button-text="取消"
-              @confirm="removeResource(resource.id)"
-            >
-              <template #reference>
-                <el-button type="danger" text size="small">
-                  <el-icon><Remove /></el-icon>
-                  移除
-                </el-button>
-              </template>
-            </el-popconfirm>
-          </div>
-        </el-card>
+          </el-card>
+        </a>
       </div>
     </div>
 
@@ -144,6 +154,7 @@ import {
   Remove,
   Loading
 } from '@element-plus/icons-vue';
+import { useDefaultFavorite } from '../../composables/useDefaultFavorite';
 import { useFavoriteStore } from '../../stores/favorite';
 import { downloadFavorite } from '../../api/favorite';
 import CreateFavoriteModal from '../../components/favorite/CreateFavoriteModal.vue';
@@ -151,6 +162,7 @@ import CreateFavoriteModal from '../../components/favorite/CreateFavoriteModal.v
 const route = useRoute();
 const router = useRouter();
 const favoriteStore = useFavoriteStore();
+const { isDefaultFavorite, setDefaultFavorite, clearDefaultFavorite } = useDefaultFavorite();
 
 // 从 route 获取收藏夹ID
 const favoriteId = computed(() => route.params.id as string);
@@ -253,12 +265,33 @@ const handleDelete = async () => {
     );
 
     await favoriteStore.deleteFavorite(favoriteId.value);
+
+    // 如果删除的是默认收藏夹，清除默认收藏夹设置
+    if (isDefaultFavorite(favoriteId.value)) {
+      clearDefaultFavorite();
+    }
+
     ElMessage.success('删除成功');
     router.push('/favorites');
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(error.message || '删除失败');
     }
+  }
+};
+
+// 设置/取消默认收藏夹
+const handleSetDefault = async () => {
+  if (!currentFavorite.value) return;
+
+  if (isDefaultFavorite(currentFavorite.value.id)) {
+    // 取消默认
+    setDefaultFavorite('', '');
+    ElMessage.success('已取消默认收藏夹');
+  } else {
+    // 设为默认
+    setDefaultFavorite(currentFavorite.value.id, currentFavorite.value.name);
+    ElMessage.success(`已将 "${currentFavorite.value.name}" 设为默认收藏夹`);
   }
 };
 
@@ -334,10 +367,16 @@ onMounted(() => {
   gap: 16px;
 }
 
+.resource-card-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
 .resource-card {
   transition: all 0.3s;
 
-  &:hover {
+  .resource-card-link:hover & {
     transform: translateY(-2px);
   }
 

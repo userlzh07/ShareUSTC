@@ -94,7 +94,8 @@
 
         <!-- 页脚 -->
         <div class="home-footer">
-          <p>2026 ShareUSTC · 学习资源分享平台</p>
+          <span>2026 ShareUSTC · 学习资源分享平台</span>
+          <span class="footer-separator">·</span>
           <el-link type="primary" @click="$router.push('/about')">关于我们</el-link>
         </div>
       </main>
@@ -541,10 +542,18 @@ onMounted(() => {
   color: #909399;
   font-size: 13px;
   margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
-.home-footer p {
-  margin: 0 0 8px 0;
+.home-footer :deep(.el-link) {
+  font-size: 13px;
+}
+
+.footer-separator {
+  margin: 0 4px;
 }
 
 /* 右侧侧边栏 */
