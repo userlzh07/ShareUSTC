@@ -826,11 +826,31 @@ pub async fn get_hot_resources(
     }
 }
 
+/// 资源数量响应
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceCountResponse {
+    pub total: i64,
+}
+
+/// 获取资源总数
+#[get("/resources/count")]
+pub async fn get_resource_count(state: web::Data<AppState>) -> impl Responder {
+    match ResourceService::get_resource_count(&state.pool).await {
+        Ok(count) => HttpResponse::Ok().json(ResourceCountResponse { total: count }),
+        Err(e) => {
+            log::warn!("[Resource] 获取资源总数失败: {}", e);
+            internal_error("获取资源总数失败")
+        }
+    }
+}
+
 /// 配置公开资源路由（不需要认证）
 pub fn config_public(cfg: &mut web::ServiceConfig) {
     // 注意：具体路径必须放在通配路径之前注册
     // 否则 /resources/hot 会被 /resources/{id} 匹配
     cfg.service(get_hot_resources) // /resources/hot （先注册具体路径）
+        .service(get_resource_count) // /resources/count
         .service(get_resource_list) // /resources
         .service(search_resources) // /resources/search
         .service(get_resource_detail) // /resources/{id} （后注册通配路径）

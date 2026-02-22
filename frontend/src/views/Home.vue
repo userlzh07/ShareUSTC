@@ -18,16 +18,23 @@
             </div>
           </div>
 
-          <div class="welcome-box guest" v-else @click="$router.push('/register')">
+          <div class="welcome-box guest" v-else @click="$router.push('/login')">
             <el-icon :size="22" class="guest-icon"><User /></el-icon>
-            <span class="guest-text">欢迎访问，点击登录 / 注册</span>
+            <span class="guest-text">点击登录</span>
           </div>
 
-          <!-- 日历（右侧，拉长） -->
-          <div class="calendar-box">
-            <el-icon :size="18"><Calendar /></el-icon>
-            <span class="calendar-date">{{ todayDate }}</span>
-            <span class="calendar-weekday">{{ todayWeekday }}</span>
+          <!-- 资源数量 + 日期（右侧） -->
+          <div class="info-box">
+            <div class="info-item">
+              <el-icon :size="18" color="#67c23a"><Document /></el-icon>
+              <span class="info-label">资源总数</span>
+              <span class="info-value resource-count">{{ resourceCount }}</span>
+            </div>
+            <div class="info-item">
+              <el-icon :size="18"><Calendar /></el-icon>
+              <span class="calendar-date">{{ todayDate }}</span>
+              <span class="calendar-weekday">{{ todayWeekday }}</span>
+            </div>
           </div>
         </div>
 
@@ -36,12 +43,46 @@
           <h1>ShareUSTC</h1>
           <p class="subtitle">学习资源分享平台</p>
           <p class="description">分享知识，传递经验，获得4.3</p>
-          
+
           <div class="hero-actions" v-if="!authStore.isAuthenticated">
             <el-button type="primary" size="large" @click="$router.push('/register')">
               <el-icon class="btn-icon"><User /></el-icon>
               注册 / 登录
             </el-button>
+          </div>
+        </div>
+
+        <!-- 使用指南 -->
+        <div class="guide-section">
+          <div class="guide-content">
+            <template v-if="!authStore.isAuthenticated">
+              <div class="guide-item">
+                <el-icon class="guide-icon" color="#67c23a"><CircleCheck /></el-icon>
+                <span>注册登录后可创建收藏夹、批量打包下载资源、参与互动、拥有个人主页</span>
+              </div>
+              <div class="guide-item">
+                <el-icon class="guide-icon" color="#67c23a"><CircleCheck /></el-icon>
+                <span>不登录也可搜索、访问、预览、下载所有已有资源</span>
+              </div>
+              <div class="guide-item">
+                <el-icon class="guide-icon" color="#67c23a"><CircleCheck /></el-icon>
+                <span>注册暂不需要填写邮箱等个人信息</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="guide-item">
+                <el-icon class="guide-icon" color="#409eff"><Collection /></el-icon>
+                <span>可创建并自主命名收藏夹（如 线性代数 力学），将资源一键加入收藏夹后打包下载</span>
+              </div>
+              <div class="guide-item">
+                <el-icon class="guide-icon" color="#409eff"><Collection /></el-icon>
+                <span>可以上传pdf、ppt、doc、md、jpg等格式的资源，也可以在线编写Markdown文档</span>
+              </div>
+              <div class="guide-item">
+                <el-icon class="guide-icon" color="#409eff"><Collection /></el-icon>
+                <span>请给优质资源打个高分，或者在评论区留下你的建议</span>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -53,7 +94,7 @@
             </div>
             <div class="link-text">
               <h3>查找资源</h3>
-              <p>按课程、类型搜索资料</p>
+              <p>按关键词、课程搜索资源，可在网页预览</p>
             </div>
             <el-icon class="link-arrow"><ArrowRight /></el-icon>
           </div>
@@ -64,7 +105,7 @@
             </div>
             <div class="link-text">
               <h3>上传资源</h3>
-              <p>分享你的学习资料</p>
+              <p>分享你的学习资料，帮助更多同学</p>
             </div>
             <el-icon class="link-arrow"><ArrowRight /></el-icon>
           </div>
@@ -75,7 +116,7 @@
             </div>
             <div class="link-text">
               <h3>加入社区</h3>
-              <p>注册账号参与互动</p>
+              <p>登录后可参与互动、打包下载文件</p>
             </div>
             <el-icon class="link-arrow"><ArrowRight /></el-icon>
           </div>
@@ -85,18 +126,11 @@
               <el-icon :size="32"><InfoFilled /></el-icon>
             </div>
             <div class="link-text">
-              <h3>关于平台</h3>
-              <p>了解更多信息</p>
+              <h3>平台介绍</h3>
+              <p>了解更多信息，给我们提点建议</p>
             </div>
             <el-icon class="link-arrow"><ArrowRight /></el-icon>
           </div>
-        </div>
-
-        <!-- 页脚 -->
-        <div class="home-footer">
-          <span>2026 ShareUSTC · 学习资源分享平台</span>
-          <span class="footer-separator">·</span>
-          <el-link type="primary" @click="$router.push('/about')">关于我们</el-link>
         </div>
       </main>
 
@@ -111,7 +145,7 @@
           <div class="search-box">
             <el-input
               v-model="searchKeyword"
-              placeholder="输入关键词搜索..."
+              placeholder="输入关键词,如 数学分析 电磁学B"
               size="large"
               clearable
               @keyup.enter="handleSearch"
@@ -174,7 +208,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
-import { getHotResources } from '../api/resource';
+import { getHotResources, getResourceCount } from '../api/resource';
 import type { HotResourceItem } from '../types/resource';
 import { ResourceTypeLabels } from '../types/resource';
 import {
@@ -186,7 +220,10 @@ import {
   Plus,
   InfoFilled,
   View,
-  Calendar
+  Calendar,
+  CircleCheck,
+  Collection,
+  Document
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 
@@ -195,6 +232,7 @@ const authStore = useAuthStore();
 const searchKeyword = ref('');
 const hotResources = ref<HotResourceItem[]>([]);
 const loadingHot = ref(false);
+const resourceCount = ref(0);
 
 // 获取当前日期
 const today = new Date();
@@ -285,8 +323,19 @@ const goToResource = (id: string) => {
   router.push(`/resources/${id}`);
 };
 
+// 获取资源总数
+const fetchResourceCount = async () => {
+  try {
+    const result = await getResourceCount();
+    resourceCount.value = result.total;
+  } catch (error) {
+    console.error('获取资源总数失败:', error);
+  }
+};
+
 onMounted(() => {
   fetchHotResources();
+  fetchResourceCount();
 });
 </script>
 
@@ -310,7 +359,9 @@ onMounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 600px;
 }
 
 /* 顶部栏（占满一行） */
@@ -325,12 +376,15 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 20px;
+  padding: 16px 20px;
   background: #fff;
   border-radius: 12px;
   border: 1px solid #ebeef5;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   flex-shrink: 0;
+  height: 72px;
+  min-height: 72px;
+  box-sizing: border-box;
 }
 
 .welcome-box.guest {
@@ -377,21 +431,49 @@ onMounted(() => {
 }
 
 /* 日历（右侧，拉长占满剩余空间） */
-.calendar-box {
+/* 右侧信息框（资源数量 + 日期） */
+.info-box {
   flex: 1;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 12px 24px;
+  justify-content: space-between;
+  padding: 16px 24px;
   background: #fff;
   border-radius: 12px;
   border: 1px solid #ebeef5;
+  min-height: 72px;
+  box-sizing: border-box;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
-.calendar-box .el-icon {
-  color: #409eff;
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.info-item:first-child {
+  margin-right: auto;
+}
+
+.info-item:last-child {
+  margin-left: auto;
+}
+
+.info-label {
+  font-size: 18px;
+  color: #606266;
+  line-height: 1;
+}
+
+.info-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.info-value.resource-count {
+  color: #67c23a;
 }
 
 .calendar-date {
@@ -411,14 +493,22 @@ onMounted(() => {
 /* Hero 区域（恢复原来大小） */
 .hero-section {
   text-align: center;
-  padding: 50px 20px;
+  padding: 40px 20px;
   background: linear-gradient(135deg, #ffcccc 0%, #ffffcc 50%, #ccf0ce 100%);
   border-radius: 16px;
   color: #456;
+  height: 320px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  box-sizing: border-box;
+  margin-top: 12px;
+  margin-bottom: 12px;
 }
 
 .hero-section h1 {
-  font-size: 48px;
+  font-size: 60px;
   font-weight: 700;
   margin: 0 0 8px 0;
   color: #121;
@@ -426,14 +516,14 @@ onMounted(() => {
 }
 
 .subtitle {
-  font-size: 22px;
+  font-size: 25px;
   font-weight: 300;
   margin: 0 0 8px 0;
   opacity: 0.95;
 }
 
 .description {
-  font-size: 16px;
+  font-size: 18px;
   opacity: 0.8;
   margin: 0 0 28px 0;
 }
@@ -458,18 +548,50 @@ onMounted(() => {
   margin-right: 6px;
 }
 
+/* 使用指南 */
+.guide-section {
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid #ebeef5;
+  padding: 28px 22px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.guide-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.guide-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 18px;
+  color: #606266;
+  line-height: 1.2;
+}
+
+.guide-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 16px;
+}
+
 /* 快捷入口（增大卡片，填充空间） */
 .quick-links {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
+  flex: 1;
+  align-content: end;
 }
 
 .quick-link-card {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 24px 20px;
+  padding: 50px 24px;
   background: #fff;
   border-radius: 14px;
   border: 1px solid #ebeef5;
@@ -514,15 +636,16 @@ onMounted(() => {
 }
 
 .link-text h3 {
-  margin: 0 0 6px 0;
-  font-size: 17px;
+  margin: 0 0 8px 0;
+  font-size: 20px;
   color: #303133;
 }
 
 .link-text p {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   color: #909399;
+  line-height: 1.5;
 }
 
 .link-arrow {
@@ -535,34 +658,14 @@ onMounted(() => {
   transform: translateX(4px);
 }
 
-/* 页脚 */
-.home-footer {
-  padding: 24px;
-  text-align: center;
-  color: #909399;
-  font-size: 13px;
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-}
-
-.home-footer :deep(.el-link) {
-  font-size: 13px;
-}
-
-.footer-separator {
-  margin: 0 4px;
-}
-
 /* 右侧侧边栏 */
 .sidebar {
-  width: 360px;
+  width: 320px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-height: 600px;
 }
 
 .sidebar-section {
@@ -611,7 +714,7 @@ onMounted(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 480px;
+  min-height: 0;
 }
 
 .hot-resources-list {
@@ -622,7 +725,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 14px 12px;
+  padding: 6px 12px;
   margin: 0 -12px;
   border-radius: 10px;
   cursor: pointer;
@@ -634,18 +737,18 @@ onMounted(() => {
 }
 
 .rank-badge {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
   background-color: #f0f2f5;
   color: #606266;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  border-radius: 8px;
+  border-radius: 6px;
   flex-shrink: 0;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .rank-badge.rank-1 {
@@ -750,6 +853,28 @@ onMounted(() => {
 
   .hot-resources-section {
     min-height: auto;
+    max-height: none;
+  }
+
+  .quick-links {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .quick-link-card {
+    padding: 36px 16px;
+  }
+
+  .link-text h3 {
+    font-size: 17px;
+  }
+
+  .link-text p {
+    font-size: 14px;
+  }
+
+  .link-icon {
+    width: 46px;
+    height: 46px;
   }
 }
 
@@ -780,7 +905,25 @@ onMounted(() => {
   }
 
   .quick-links {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .quick-link-card {
+    padding: 32px 14px;
+    gap: 10px;
+  }
+
+  .link-text h3 {
+    font-size: 16px;
+  }
+
+  .link-text p {
+    font-size: 13px;
+  }
+
+  .link-icon {
+    width: 42px;
+    height: 42px;
   }
 
   .sidebar {
@@ -801,4 +944,5 @@ onMounted(() => {
     font-size: 28px;
   }
 }
+
 </style>

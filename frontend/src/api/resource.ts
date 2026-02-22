@@ -427,3 +427,14 @@ export const getHotResources = async (limit?: number): Promise<HotResourceItem[]
     params: { limit }
   }) as Promise<HotResourceItem[]>;
 };
+
+/**
+ * 获取资源总数
+ * @returns 资源总数
+ */
+export const getResourceCount = async (): Promise<{ total: number }> => {
+  return request({
+    url: '/resources/count',
+    method: 'get'
+  }) as Promise<{ total: number }>;
+};

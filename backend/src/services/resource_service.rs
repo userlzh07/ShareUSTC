@@ -1579,4 +1579,14 @@ impl ResourceService {
 
         Ok(resources)
     }
+
+    /// 获取资源总数
+    pub async fn get_resource_count(pool: &PgPool) -> Result<i64, ResourceError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM resources")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+
+        Ok(count)
+    }
 }

@@ -149,12 +149,14 @@
         <span>上传须知</span>
       </template>
       <ul>
-        <li>支持上传：PDF、PPT、PPTX、DOC、DOCX、TXT、Markdown、图片、ZIP等格式</li>
+        <li>支持上传：PDF、PPT、PPTX、DOC、DOCX、TXT、Markdown、图片、ZIP格式</li>
         <li>在线编写 Markdown 可直接在网页中编辑并保存为 .md 文件</li>
         <li>单个文件大小限制：100MB</li>
-        <li>资源需经过AI审核，违规内容将被拒绝</li>
-        <li>请确保上传资源不侵犯他人版权</li>
-        <li>优质资源将获得更多曝光和下载</li>
+        <li>资源需经过AI审核，违规内容将被拒绝(暂时没有实现...)</li>
+        <li>审核通过后资源将公开展示，任何人都可以查看和下载</li>
+        <li>请确保上传资源不侵犯他人版权，禁止上传涉密内容</li>
+        <li>请勿上传出版物；上传教师PPT需要明确征得教师允许</li>
+        <li>高评分资源将获得更多曝光和下载，我们鼓励上传自己原创的优质资源！</li>
       </ul>
     </el-card>
   </div>
@@ -573,7 +575,7 @@ const resetAndUpload = () => {
 .upload-tips li {
   margin-bottom: 8px;
   color: var(--el-text-color-regular);
-  line-height: 1.6;
+  line-height: 1.4;
 }
 
 .upload-tips li:last-child {
