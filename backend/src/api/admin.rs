@@ -1,12 +1,16 @@
+use actix_multipart::Multipart;
 use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse, Responder};
+use calamine::Reader;
+use futures_util::StreamExt;
 use uuid::Uuid;
 
 use crate::db::AppState;
 use crate::models::CurrentUser;
 use crate::models::{
-    BatchImportCoursesRequest, BatchImportTeachersRequest, CourseListQuery, CreateCourseRequest,
-    CreateTeacherRequest, TeacherListQuery, UpdateCourseRequest, UpdateCourseStatusRequest,
-    UpdateTeacherRequest, UpdateTeacherStatusRequest,
+    BatchDeleteCoursesRequest, BatchDeleteTeachersRequest, BatchImportCourseItem,
+    BatchImportCoursesRequest, BatchImportTeacherItem, BatchImportTeachersRequest, CourseListQuery,
+    CreateCourseRequest, CreateTeacherRequest, TeacherListQuery, UpdateCourseRequest,
+    UpdateCourseStatusRequest, UpdateTeacherRequest, UpdateTeacherStatusRequest,
 };
 use crate::services::{
     AdminError, AdminService, AuditLogQuery, AuditLogService, AuditResourceRequest, CourseError,
@@ -725,11 +729,6 @@ async fn batch_import_teachers(
         return handle_admin_error(e);
     }
 
-    // 限制单次导入数量
-    if req.teachers.len() > 1000 {
-        return bad_request("单次导入数量不能超过1000条");
-    }
-
     if req.teachers.is_empty() {
         return bad_request("导入数据不能为空");
     }
@@ -762,11 +761,6 @@ async fn batch_import_courses(
         return handle_admin_error(e);
     }
 
-    // 限制单次导入数量
-    if req.courses.len() > 1000 {
-        return bad_request("单次导入数量不能超过1000条");
-    }
-
     if req.courses.is_empty() {
         return bad_request("导入数据不能为空");
     }
@@ -777,6 +771,404 @@ async fn batch_import_courses(
                 "[Admin] 批量导入课程完成 | admin_id={}, success={}, fail={}",
                 user.id,
                 result.success_count,
+                result.fail_count
+            );
+            HttpResponse::Ok().json(result)
+        }
+        Err(e) => handle_course_error(e),
+    }
+}
+
+/// 解析文件内容为教师数据
+fn parse_teachers_from_bytes(
+    data: &[u8],
+    file_type: &str,
+) -> Result<Vec<BatchImportTeacherItem>, String> {
+    match file_type {
+        "json" => {
+            let teachers: Vec<BatchImportTeacherItem> =
+                serde_json::from_slice(data).map_err(|e| format!("JSON解析错误: {}", e))?;
+            Ok(teachers)
+        }
+        "csv" => {
+            let mut rdr = csv::Reader::from_reader(data);
+            let mut teachers = Vec::new();
+            for (idx, result) in rdr.records().enumerate() {
+                let record = result.map_err(|e| format!("CSV第{}行解析错误: {}", idx + 1, e))?;
+                let name = record
+                    .get(0)
+                    .ok_or_else(|| format!("CSV第{}行: 缺少姓名", idx + 1))?
+                    .trim()
+                    .to_string();
+                let department = record.get(1).map(|s| s.trim().to_string());
+                let department = if department.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                    None
+                } else {
+                    department
+                };
+                teachers.push(BatchImportTeacherItem { name, department });
+            }
+            Ok(teachers)
+        }
+        "xlsx" => {
+            let mut teachers = Vec::new();
+            let cursor = std::io::Cursor::new(data);
+            let mut workbook: calamine::Xlsx<std::io::Cursor<&[u8]>> = calamine::Xlsx::new(cursor)
+                .map_err(|e| format!("Excel文件解析错误: {:?}", e))?;
+            let range = workbook
+                .worksheet_range_at(0)
+                .ok_or("无法读取Excel第一个工作表")?
+                .map_err(|e| format!("Excel读取错误: {:?}", e))?;
+
+            for (idx, row) in range.rows().enumerate().skip(1) {
+                // 跳过标题行
+                let name_cell = row
+                    .get(0)
+                    .ok_or_else(|| format!("Excel第{}行: 缺少姓名", idx + 1))?;
+                let name = name_cell.to_string().trim().to_string();
+                let department: Option<String> = row.get(1).map(|c| c.to_string().trim().to_string());
+                let department = if department.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                    None
+                } else {
+                    department
+                };
+                teachers.push(BatchImportTeacherItem { name, department });
+            }
+            Ok(teachers)
+        }
+        _ => Err("不支持的文件格式".to_string()),
+    }
+}
+
+/// 解析文件内容为课程数据
+fn parse_courses_from_bytes(
+    data: &[u8],
+    file_type: &str,
+) -> Result<Vec<BatchImportCourseItem>, String> {
+    match file_type {
+        "json" => {
+            let courses: Vec<BatchImportCourseItem> =
+                serde_json::from_slice(data).map_err(|e| format!("JSON解析错误: {}", e))?;
+            Ok(courses)
+        }
+        "csv" => {
+            let mut rdr = csv::Reader::from_reader(data);
+            let mut courses = Vec::new();
+            for (idx, result) in rdr.records().enumerate() {
+                let record = result.map_err(|e| format!("CSV第{}行解析错误: {}", idx + 1, e))?;
+                let name = record
+                    .get(0)
+                    .ok_or_else(|| format!("CSV第{}行: 缺少课程名称", idx + 1))?
+                    .trim()
+                    .to_string();
+                let semester = record.get(1).map(|s| s.trim().to_string());
+                let semester = if semester.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                    None
+                } else {
+                    semester
+                };
+                let credits = record
+                    .get(2)
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .filter(|&c| c > 0.0);
+                courses.push(BatchImportCourseItem {
+                    name,
+                    semester,
+                    credits,
+                });
+            }
+            Ok(courses)
+        }
+        "xlsx" => {
+            let mut courses = Vec::new();
+            let cursor = std::io::Cursor::new(data);
+            let mut workbook: calamine::Xlsx<std::io::Cursor<&[u8]>> = calamine::Xlsx::new(cursor)
+                .map_err(|e| format!("Excel文件解析错误: {:?}", e))?;
+            let range = workbook
+                .worksheet_range_at(0)
+                .ok_or("无法读取Excel第一个工作表")?
+                .map_err(|e| format!("Excel读取错误: {:?}", e))?;
+
+            for (idx, row) in range.rows().enumerate().skip(1) {
+                // 跳过标题行
+                let name_cell = row
+                    .get(0)
+                    .ok_or_else(|| format!("Excel第{}行: 缺少课程名称", idx + 1))?;
+                let name = name_cell.to_string().trim().to_string();
+                let semester: Option<String> = row.get(1).map(|c| c.to_string().trim().to_string());
+                let semester = if semester.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                    None
+                } else {
+                    semester
+                };
+                let credits = row
+                    .get(2)
+                    .and_then(|c| c.to_string().trim().parse::<f64>().ok())
+                    .filter(|&c| c > 0.0);
+                courses.push(BatchImportCourseItem {
+                    name,
+                    semester,
+                    credits,
+                });
+            }
+            Ok(courses)
+        }
+        _ => Err("不支持的文件格式".to_string()),
+    }
+}
+
+/// 从文件批量导入教师
+#[post("/admin/teachers/batch-import-file")]
+async fn batch_import_teachers_from_file(
+    data: web::Data<AppState>,
+    current_user: actix_web::web::ReqData<CurrentUser>,
+    mut payload: Multipart,
+) -> impl Responder {
+    let user = current_user.into_inner();
+    log::info!("[Admin] 开始从文件批量导入教师 | admin_id={}", user.id);
+
+    if let Err(e) = check_admin(&user) {
+        return handle_admin_error(e);
+    }
+
+    let mut file_data: Vec<u8> = Vec::new();
+    let mut file_type: String = String::new();
+
+    // 读取上传的文件
+    while let Some(Ok(mut field)) = payload.next().await {
+        let content_disposition = field.content_disposition();
+        let name = content_disposition
+            .get_name()
+            .unwrap_or_default()
+            .to_string();
+
+        if name == "file" {
+            // 从文件名推断文件类型
+            if let Some(filename) = content_disposition.get_filename() {
+                file_type = if filename.ends_with(".json") {
+                    "json".to_string()
+                } else if filename.ends_with(".csv") {
+                    "csv".to_string()
+                } else if filename.ends_with(".xlsx") {
+                    "xlsx".to_string()
+                } else {
+                    return bad_request("不支持的文件格式，请上传 .json, .csv 或 .xlsx 文件");
+                };
+            }
+
+            // 读取文件内容
+            while let Some(chunk) = field.next().await {
+                match chunk {
+                    Ok(bytes) => file_data.extend_from_slice(&bytes),
+                    Err(e) => {
+                        log::error!("[Admin] 读取文件失败 | error={}", e);
+                        return bad_request("文件读取失败");
+                    }
+                }
+            }
+        }
+    }
+
+    if file_data.is_empty() {
+        return bad_request("未上传文件或文件为空");
+    }
+
+    if file_type.is_empty() {
+        return bad_request("无法识别文件类型");
+    }
+
+    // 解析文件内容
+    let teachers = match parse_teachers_from_bytes(&file_data, &file_type) {
+        Ok(teachers) => teachers,
+        Err(e) => {
+            return bad_request(&e);
+        }
+    };
+
+    if teachers.is_empty() {
+        return bad_request("文件中没有有效的教师数据");
+    }
+
+    log::info!(
+        "[Admin] 文件解析成功，开始导入 | admin_id={}, count={}",
+        user.id,
+        teachers.len()
+    );
+
+    // 调用批量导入服务
+    match TeacherService::batch_import_teachers(&data.pool, teachers).await {
+        Ok(result) => {
+            log::info!(
+                "[Admin] 批量导入教师完成 | admin_id={}, success={}, fail={}",
+                user.id,
+                result.success_count,
+                result.fail_count
+            );
+            HttpResponse::Ok().json(result)
+        }
+        Err(e) => handle_teacher_error(e),
+    }
+}
+
+/// 从文件批量导入课程
+#[post("/admin/courses/batch-import-file")]
+async fn batch_import_courses_from_file(
+    data: web::Data<AppState>,
+    current_user: actix_web::web::ReqData<CurrentUser>,
+    mut payload: Multipart,
+) -> impl Responder {
+    let user = current_user.into_inner();
+    log::info!("[Admin] 开始从文件批量导入课程 | admin_id={}", user.id);
+
+    if let Err(e) = check_admin(&user) {
+        return handle_admin_error(e);
+    }
+
+    let mut file_data: Vec<u8> = Vec::new();
+    let mut file_type: String = String::new();
+
+    // 读取上传的文件
+    while let Some(Ok(mut field)) = payload.next().await {
+        let content_disposition = field.content_disposition();
+        let name = content_disposition
+            .get_name()
+            .unwrap_or_default()
+            .to_string();
+
+        if name == "file" {
+            // 从文件名推断文件类型
+            if let Some(filename) = content_disposition.get_filename() {
+                file_type = if filename.ends_with(".json") {
+                    "json".to_string()
+                } else if filename.ends_with(".csv") {
+                    "csv".to_string()
+                } else if filename.ends_with(".xlsx") {
+                    "xlsx".to_string()
+                } else {
+                    return bad_request("不支持的文件格式，请上传 .json, .csv 或 .xlsx 文件");
+                };
+            }
+
+            // 读取文件内容
+            while let Some(chunk) = field.next().await {
+                match chunk {
+                    Ok(bytes) => file_data.extend_from_slice(&bytes),
+                    Err(e) => {
+                        log::error!("[Admin] 读取文件失败 | error={}", e);
+                        return bad_request("文件读取失败");
+                    }
+                }
+            }
+        }
+    }
+
+    if file_data.is_empty() {
+        return bad_request("未上传文件或文件为空");
+    }
+
+    if file_type.is_empty() {
+        return bad_request("无法识别文件类型");
+    }
+
+    // 解析文件内容
+    let courses = match parse_courses_from_bytes(&file_data, &file_type) {
+        Ok(courses) => courses,
+        Err(e) => {
+            return bad_request(&e);
+        }
+    };
+
+    if courses.is_empty() {
+        return bad_request("文件中没有有效的课程数据");
+    }
+
+    log::info!(
+        "[Admin] 文件解析成功，开始导入 | admin_id={}, count={}",
+        user.id,
+        courses.len()
+    );
+
+    // 调用批量导入服务
+    match CourseService::batch_import_courses(&data.pool, courses).await {
+        Ok(result) => {
+            log::info!(
+                "[Admin] 批量导入课程完成 | admin_id={}, success={}, fail={}",
+                user.id,
+                result.success_count,
+                result.fail_count
+            );
+            HttpResponse::Ok().json(result)
+        }
+        Err(e) => handle_course_error(e),
+    }
+}
+
+/// 批量删除教师
+#[post("/admin/teachers/batch-delete")]
+async fn batch_delete_teachers(
+    data: web::Data<AppState>,
+    current_user: actix_web::web::ReqData<CurrentUser>,
+    req: web::Json<BatchDeleteTeachersRequest>,
+) -> impl Responder {
+    let user = current_user.into_inner();
+    log::info!(
+        "[Admin] 批量删除教师 | admin_id={}, sns={}",
+        user.id,
+        req.sns
+    );
+
+    if let Err(e) = check_admin(&user) {
+        return handle_admin_error(e);
+    }
+
+    if req.sns.trim().is_empty() {
+        return bad_request("编号列表不能为空");
+    }
+
+    match TeacherService::batch_delete_teachers(&data.pool, &req.sns).await {
+        Ok(result) => {
+            log::info!(
+                "[Admin] 批量删除教师完成 | admin_id={}, success={}, not_found={}, fail={}",
+                user.id,
+                result.success_count,
+                result.not_found_count,
+                result.fail_count
+            );
+            HttpResponse::Ok().json(result)
+        }
+        Err(e) => handle_teacher_error(e),
+    }
+}
+
+/// 批量删除课程
+#[post("/admin/courses/batch-delete")]
+async fn batch_delete_courses(
+    data: web::Data<AppState>,
+    current_user: actix_web::web::ReqData<CurrentUser>,
+    req: web::Json<BatchDeleteCoursesRequest>,
+) -> impl Responder {
+    let user = current_user.into_inner();
+    log::info!(
+        "[Admin] 批量删除课程 | admin_id={}, sns={}",
+        user.id,
+        req.sns
+    );
+
+    if let Err(e) = check_admin(&user) {
+        return handle_admin_error(e);
+    }
+
+    if req.sns.trim().is_empty() {
+        return bad_request("编号列表不能为空");
+    }
+
+    match CourseService::batch_delete_courses(&data.pool, &req.sns).await {
+        Ok(result) => {
+            log::info!(
+                "[Admin] 批量删除课程完成 | admin_id={}, success={}, not_found={}, fail={}",
+                user.id,
+                result.success_count,
+                result.not_found_count,
                 result.fail_count
             );
             HttpResponse::Ok().json(result)
@@ -812,5 +1204,11 @@ pub fn config(cfg: &mut web::ServiceConfig) {
         .service(delete_course)
         // 批量导入
         .service(batch_import_teachers)
-        .service(batch_import_courses);
+        .service(batch_import_courses)
+        // 从文件批量导入
+        .service(batch_import_teachers_from_file)
+        .service(batch_import_courses_from_file)
+        // 批量删除
+        .service(batch_delete_teachers)
+        .service(batch_delete_courses);
 }

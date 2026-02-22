@@ -295,6 +295,42 @@ export const deleteCourse = (sn: number): Promise<void> => {
 };
 
 // =====================
+// 批量删除相关
+// =====================
+
+export interface BatchDeleteTeachersResult {
+  successCount: number;
+  failCount: number;
+  notFoundCount: number;
+  failedItems: FailedTeacherDeleteItem[];
+}
+
+export interface FailedTeacherDeleteItem {
+  sn: number;
+  reason: string;
+}
+
+export interface BatchDeleteCoursesResult {
+  successCount: number;
+  failCount: number;
+  notFoundCount: number;
+  failedItems: FailedCourseDeleteItem[];
+}
+
+export interface FailedCourseDeleteItem {
+  sn: number;
+  reason: string;
+}
+
+export const batchDeleteTeachers = (sns: string): Promise<BatchDeleteTeachersResult> => {
+  return request.post('/admin/teachers/batch-delete', { sns });
+};
+
+export const batchDeleteCourses = (sns: string): Promise<BatchDeleteCoursesResult> => {
+  return request.post('/admin/courses/batch-delete', { sns });
+};
+
+// =====================
 // 批量导入相关
 // =====================
 
@@ -339,6 +375,28 @@ export const batchImportTeachers = (teachers: BatchImportTeacherItem[]): Promise
   return request.post('/admin/teachers/batch-import', { teachers });
 };
 
+// 从文件导入教师
+export const batchImportTeachersFromFile = (file: File): Promise<BatchImportTeachersResult> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post('/admin/teachers/batch-import-file', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+};
+
+// 从文件导入课程
+export const batchImportCoursesFromFile = (file: File): Promise<BatchImportCoursesResult> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request.post('/admin/courses/batch-import-file', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+};
+
 // 导出API对象
 export const adminApi = {
   getDashboardStats,
@@ -366,5 +424,10 @@ export const adminApi = {
   deleteCourse,
   // 批量导入
   batchImportCourses,
-  batchImportTeachers
+  batchImportTeachers,
+  batchImportCoursesFromFile,
+  batchImportTeachersFromFile,
+  // 批量删除
+  batchDeleteTeachers,
+  batchDeleteCourses
 };

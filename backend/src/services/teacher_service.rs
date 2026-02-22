@@ -1,9 +1,9 @@
 use sqlx::PgPool;
 
 use crate::models::{
-    BatchImportTeacherItem, BatchImportTeachersResult, CreateTeacherRequest,
-    FailedTeacherImportItem, Teacher, TeacherListQuery, TeacherListResponse, UpdateTeacherRequest,
-    UpdateTeacherStatusRequest,
+    BatchDeleteTeachersResult, BatchImportTeacherItem, BatchImportTeachersResult,
+    CreateTeacherRequest, FailedTeacherDeleteItem, FailedTeacherImportItem, Teacher,
+    TeacherListQuery, TeacherListResponse, UpdateTeacherRequest, UpdateTeacherStatusRequest,
 };
 
 /// 教师服务错误类型
@@ -324,6 +324,128 @@ impl TeacherService {
         Ok(BatchImportTeachersResult {
             success_count,
             fail_count,
+            failed_items,
+        })
+    }
+
+    /// 解析编号字符串，如 "1,2-10,100-200,344" 解析为 [1, 2, 3, ..., 10, 100, 101, ..., 200, 344]
+    fn parse_sn_ranges(sns_str: &str) -> Result<Vec<i64>, String> {
+        let mut sns = Vec::new();
+
+        for part in sns_str.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+
+            if part.contains('-') {
+                // 范围格式: start-end
+                let range_parts: Vec<&str> = part.split('-').collect();
+                if range_parts.len() != 2 {
+                    return Err(format!("无效的编号范围: {}", part));
+                }
+
+                let start: i64 = range_parts[0]
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("无效的编号: {}", range_parts[0]))?;
+                let end: i64 = range_parts[1]
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("无效的编号: {}", range_parts[1]))?;
+
+                if start > end {
+                    return Err(format!("范围起始值不能大于结束值: {}", part));
+                }
+
+                if start <= 0 || end <= 0 {
+                    return Err("编号必须为正整数".to_string());
+                }
+
+                // 限制单次范围大小为10000，防止内存溢出
+                if end - start > 10000 {
+                    return Err(format!("范围 {}-{} 过大，单次最多支持10000个", start, end));
+                }
+
+                for sn in start..=end {
+                    sns.push(sn);
+                }
+            } else {
+                // 单个编号
+                let sn: i64 = part
+                    .parse()
+                    .map_err(|_| format!("无效的编号: {}", part))?;
+
+                if sn <= 0 {
+                    return Err("编号必须为正整数".to_string());
+                }
+
+                sns.push(sn);
+            }
+        }
+
+        // 去重并排序
+        sns.sort_unstable();
+        sns.dedup();
+
+        // 限制总数为50000，防止内存溢出
+        if sns.len() > 50000 {
+            return Err("单次删除数量不能超过50000条".to_string());
+        }
+
+        Ok(sns)
+    }
+
+    /// 批量删除教师
+    pub async fn batch_delete_teachers(
+        pool: &PgPool,
+        sns_str: &str,
+    ) -> Result<BatchDeleteTeachersResult, TeacherError> {
+        // 解析编号列表
+        let sns = match Self::parse_sn_ranges(sns_str) {
+            Ok(sns) => sns,
+            Err(e) => return Err(TeacherError::ValidationError(e)),
+        };
+
+        if sns.is_empty() {
+            return Err(TeacherError::ValidationError("编号列表不能为空".to_string()));
+        }
+
+        let mut success_count = 0i32;
+        let mut not_found_count = 0i32;
+        let mut failed_items: Vec<FailedTeacherDeleteItem> = Vec::new();
+
+        // 逐个删除（由于需要准确反馈每条记录的结果，使用循环删除而非批量删除）
+        for sn in sns {
+            match sqlx::query("DELETE FROM teachers WHERE sn = $1")
+                .bind(sn)
+                .execute(pool)
+                .await
+            {
+                Ok(result) => {
+                    if result.rows_affected() > 0 {
+                        success_count += 1;
+                    } else {
+                        not_found_count += 1;
+                        failed_items.push(FailedTeacherDeleteItem {
+                            sn,
+                            reason: "教师编号不存在".to_string(),
+                        });
+                    }
+                }
+                Err(e) => {
+                    failed_items.push(FailedTeacherDeleteItem {
+                        sn,
+                        reason: format!("数据库错误: {}", e),
+                    });
+                }
+            }
+        }
+
+        Ok(BatchDeleteTeachersResult {
+            success_count,
+            fail_count: failed_items.len() as i32,
+            not_found_count,
             failed_items,
         })
     }
