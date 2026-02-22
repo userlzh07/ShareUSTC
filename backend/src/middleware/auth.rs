@@ -99,13 +99,6 @@ impl JwtAuth {
         self
     }
 
-    /// 检查路径是否是公开路径（预留接口）
-    #[allow(dead_code)]
-    fn is_public_path(&self, path: &str, method: &Method) -> bool {
-        self.public_paths
-            .iter()
-            .any(|rule| rule.matches(path, method))
-    }
 }
 
 impl<S, B> Transform<S, ServiceRequest> for JwtAuth

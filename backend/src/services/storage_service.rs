@@ -53,6 +53,7 @@ impl std::error::Error for StorageError {}
 pub struct StorageFileMetadata {
     pub content_length: Option<u64>,
     pub content_type: Option<String>,
+    #[allow(dead_code)]
     pub etag: Option<String>,
 }
 
@@ -105,8 +106,6 @@ pub trait StorageBackend: Send + Sync {
     ) -> StorageFuture<'a, String>;
 
     fn head_file<'a>(&'a self, key: &'a str) -> StorageFuture<'a, StorageFileMetadata>;
-
-    fn file_exists<'a>(&'a self, key: &'a str) -> StorageFuture<'a, bool>;
 
     fn get_sts_token<'a>(
         &'a self,
@@ -267,12 +266,6 @@ impl StorageBackend for LocalStorage {
         self.get_file_url(key, expires_secs)
     }
 
-    fn file_exists<'a>(&'a self, key: &'a str) -> StorageFuture<'a, bool> {
-        Box::pin(async move {
-            let full_path = self.resolve_local_path(key)?;
-            Ok(fs::metadata(full_path).await.is_ok())
-        })
-    }
 
     fn get_upload_url<'a>(
         &'a self,

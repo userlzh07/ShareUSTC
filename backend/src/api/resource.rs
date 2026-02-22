@@ -325,16 +325,16 @@ pub async fn get_my_resources(
 #[get("/resources/{resource_id}/download")]
 pub async fn download_resource(
     state: web::Data<AppState>,
-    user: Option<web::ReqData<CurrentUser>>,
+    user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
     req: HttpRequest,
 ) -> impl Responder {
     let resource_id = path.into_inner();
 
-    // 获取资源文件路径和存储类型
-    match ResourceService::get_resource_file_path(&state.pool, resource_id).await {
+    // 获取资源文件路径和存储类型（带权限检查）
+    match ResourceService::get_resource_file_path(&state.pool, resource_id, &user).await {
         Ok((file_path, resource_type, title, storage_type)) => {
-            let user_id = user.as_ref().map(|u| u.id);
+            let user_id = Some(user.id);
             let content_type = crate::services::FileService::get_mime_type_by_type(&resource_type);
             let extension = crate::services::FileService::get_extension_by_type(&resource_type);
             let filename = format!("{}.{}", sanitize_filename(&title), extension);
@@ -425,6 +425,7 @@ pub async fn download_resource(
             );
             match e {
                 ResourceError::NotFound(msg) => not_found(&msg),
+                ResourceError::Unauthorized(msg) => forbidden(&msg),
                 _ => internal_error("获取资源失败"),
             }
         }
@@ -523,12 +524,13 @@ fn build_content_disposition(filename: &str) -> String {
 #[get("/resources/{resource_id}/preview-url")]
 pub async fn get_resource_preview_url(
     state: web::Data<AppState>,
+    user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
 ) -> impl Responder {
     let resource_id = path.into_inner();
 
-    // 获取资源文件路径和存储类型（预览不检查审核状态）
-    match ResourceService::get_resource_file_path_for_preview(&state.pool, resource_id).await {
+    // 获取资源文件路径和存储类型（带权限检查）
+    match ResourceService::get_resource_file_path_for_preview(&state.pool, resource_id, &user).await {
         Ok((file_path, resource_type, storage_type, updated_at)) => {
             let is_oss = storage_type.as_deref() == Some("oss");
 
@@ -584,6 +586,7 @@ pub async fn get_resource_preview_url(
             );
             match e {
                 ResourceError::NotFound(msg) => not_found(&msg),
+                ResourceError::Unauthorized(msg) => forbidden(&msg),
                 _ => internal_error("获取预览链接失败"),
             }
         }
@@ -595,12 +598,13 @@ pub async fn get_resource_preview_url(
 #[get("/resources/{resource_id}/content")]
 pub async fn get_resource_content(
     state: web::Data<AppState>,
+    user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
 ) -> impl Responder {
     let resource_id = path.into_inner();
 
-    // 获取资源文件路径和存储类型（预览不检查审核状态）
-    match ResourceService::get_resource_file_path_for_preview(&state.pool, resource_id).await {
+    // 获取资源文件路径和存储类型（带权限检查）
+    match ResourceService::get_resource_file_path_for_preview(&state.pool, resource_id, &user).await {
         Ok((file_path, resource_type, storage_type, updated_at)) => {
             // 根据资源实际的存储类型选择正确的存储后端读取文件
             // 使用后端代理模式，避免浏览器直接访问 OSS 产生 CORS 问题
@@ -696,6 +700,7 @@ pub async fn get_resource_content(
             );
             match e {
                 ResourceError::NotFound(msg) => not_found(&msg),
+                ResourceError::Unauthorized(msg) => forbidden(&msg),
                 _ => internal_error("获取资源失败"),
             }
         }

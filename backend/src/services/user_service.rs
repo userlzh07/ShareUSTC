@@ -13,8 +13,6 @@ pub enum UserError {
     UserExists(String),
     DatabaseError(String),
     ValidationError(String),
-    #[allow(dead_code)]
-    Forbidden(String),
 }
 
 impl std::fmt::Display for UserError {
@@ -24,7 +22,6 @@ impl std::fmt::Display for UserError {
             UserError::UserExists(msg) => write!(f, "用户已存在: {}", msg),
             UserError::DatabaseError(msg) => write!(f, "数据库错误: {}", msg),
             UserError::ValidationError(msg) => write!(f, "验证错误: {}", msg),
-            UserError::Forbidden(msg) => write!(f, "没有权限: {}", msg),
         }
     }
 }

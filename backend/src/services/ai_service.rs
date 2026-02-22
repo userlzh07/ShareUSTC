@@ -61,23 +61,6 @@ impl AiService {
         })
     }
 
-    /// 推荐资源（预留接口）
-    ///
-    /// 当前阶段：返回空列表
-    #[allow(dead_code)]
-    pub async fn recommend_resources(
-        _user_id: uuid::Uuid,
-        _course_name: Option<&str>,
-        _limit: i32,
-    ) -> Result<Vec<uuid::Uuid>, AiError> {
-        // TODO: 接入真实 AI 推荐服务
-        // 当前阶段返回空列表
-
-        log::debug!("AI 推荐资源: 用户ID={}", _user_id);
-
-        Ok(vec![])
-    }
-
     /// 获取 AI 不通过原因（用于人工审核参考）（预留接口）
     ///
     /// 当前阶段：返回固定文本

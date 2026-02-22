@@ -18,18 +18,19 @@ pub struct Notification {
 
 /// 通知类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum NotificationType {
-    /// 审核结果
+    /// 审核结果（预留）
     AuditResult,
-    /// 申领结果
+    /// 申领结果（预留）
     ClaimResult,
     /// 评论回复
     CommentReply,
     /// 评分提醒
     RatingReminder,
-    /// 管理员消息
+    /// 管理员消息（预留）
     AdminMessage,
-    /// 系统通知
+    /// 系统通知（预留）
     System,
 }
 
@@ -45,6 +46,7 @@ impl NotificationType {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "audit_result" => Some(NotificationType::AuditResult),
@@ -60,8 +62,9 @@ impl NotificationType {
 
 /// 通知优先级
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum NotificationPriority {
-    /// 高优先级（弹窗显示）
+    /// 高优先级（弹窗显示，预留）
     High,
     /// 普通优先级
     Normal,

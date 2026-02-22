@@ -315,14 +315,6 @@ impl OssStorage {
         ))
     }
 
-    fn object_url(&self, normalized_key: &str) -> String {
-        format!(
-            "{}://{}/{}",
-            self.endpoint_scheme(),
-            self.object_host(),
-            percent_encode(normalized_key, false)
-        )
-    }
 
     async fn put_object(
         &self,
@@ -394,6 +386,7 @@ impl OssStorage {
         }
     }
 
+    #[allow(dead_code)]
     pub fn bucket_name(&self) -> &str {
         &self.config.bucket
     }
@@ -542,29 +535,6 @@ impl StorageBackend for OssStorage {
                         status, body
                     )))
                 }
-            }
-        })
-    }
-
-    fn file_exists<'a>(&'a self, key: &'a str) -> StorageFuture<'a, bool> {
-        Box::pin(async move {
-            let signed_url = self.build_presigned_url("GET", key, 60, None, None)?;
-
-            let response = self
-                .client
-                .get(&signed_url)
-                .header("Range", "bytes=0-0")
-                .send()
-                .await
-                .map_err(|e| StorageError::Backend(format!("OSS 检查文件存在性失败: {}", e)))?;
-
-            match response.status() {
-                StatusCode::OK | StatusCode::PARTIAL_CONTENT => Ok(true),
-                StatusCode::NOT_FOUND => Ok(false),
-                status => Err(StorageError::Backend(format!(
-                    "OSS 检查文件存在性失败，HTTP 状态码: {}",
-                    status
-                ))),
             }
         })
     }

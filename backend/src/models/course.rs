@@ -17,29 +17,6 @@ pub struct Course {
     pub updated_at: NaiveDateTime,
 }
 
-/// 课程响应 DTO
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CourseResponse {
-    pub sn: i64,
-    pub name: String,
-    pub semester: Option<String>,
-    pub credits: Option<f64>,
-    pub is_active: bool,
-}
-
-impl From<Course> for CourseResponse {
-    fn from(course: Course) -> Self {
-        Self {
-            sn: course.sn,
-            name: course.name,
-            semester: course.semester,
-            credits: course.credits,
-            is_active: course.is_active,
-        }
-    }
-}
-
 /// 创建课程请求 DTO
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

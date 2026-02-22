@@ -16,27 +16,6 @@ pub struct Teacher {
     pub updated_at: NaiveDateTime,
 }
 
-/// 教师响应 DTO
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TeacherResponse {
-    pub sn: i64,
-    pub name: String,
-    pub department: Option<String>,
-    pub is_active: bool,
-}
-
-impl From<Teacher> for TeacherResponse {
-    fn from(teacher: Teacher) -> Self {
-        Self {
-            sn: teacher.sn,
-            name: teacher.name,
-            department: teacher.department,
-            is_active: teacher.is_active,
-        }
-    }
-}
-
 /// 创建教师请求 DTO
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

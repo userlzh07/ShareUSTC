@@ -38,8 +38,6 @@ impl From<super::file_service::FileError> for ResourceError {
             super::file_service::FileError::ValidationError(msg) => {
                 ResourceError::ValidationError(msg)
             }
-            super::file_service::FileError::FileSystemError(msg) => ResourceError::FileError(msg),
-            super::file_service::FileError::NotFound(msg) => ResourceError::NotFound(msg),
         }
     }
 }
@@ -1311,8 +1309,7 @@ impl ResourceService {
         Ok(())
     }
 
-    /// 增加访问次数（预留接口）
-    #[allow(dead_code)]
+    /// 增加访问次数
     pub async fn increment_views(pool: &PgPool, resource_id: Uuid) -> Result<(), ResourceError> {
         sqlx::query("UPDATE resource_stats SET views = views + 1 WHERE resource_id = $1")
             .bind(resource_id)
@@ -1323,39 +1320,71 @@ impl ResourceService {
         Ok(())
     }
 
-    /// 获取资源文件路径（检查审核状态，用于下载）
+    /// 获取资源文件路径（检查审核状态和权限，用于下载）
     /// 返回：(file_path, resource_type, title, storage_type)
+    /// 非管理员只能访问已通过审核的资源
     pub async fn get_resource_file_path(
         pool: &PgPool,
         resource_id: Uuid,
+        user: &CurrentUser,
     ) -> Result<(String, String, String, Option<String>), ResourceError> {
-        let row: (String, String, String, Option<String>) = sqlx::query_as(
-            "SELECT file_path, resource_type, title, storage_type FROM resources WHERE id = $1 AND audit_status = 'approved'"
+        // 获取资源信息，包括审核状态和上传者
+        let row: (String, String, String, Option<String>, String, Uuid) = sqlx::query_as(
+            "SELECT file_path, resource_type, title, storage_type, audit_status, uploader_id FROM resources WHERE id = $1"
         )
         .bind(resource_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
-        .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在或未通过审核", resource_id)))?;
+        .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
 
-        Ok(row)
+        let audit_status = row.4;
+        let uploader_id = row.5;
+
+        // 检查权限：非管理员且非上传者时，只能访问已通过审核的资源
+        let is_admin = matches!(user.role, crate::models::UserRole::Admin);
+        let is_uploader = user.id == uploader_id;
+
+        if audit_status != "approved" && !is_admin && !is_uploader {
+            return Err(ResourceError::Unauthorized(
+                "该资源尚未通过审核，无法下载".to_string(),
+            ));
+        }
+
+        Ok((row.0, row.1, row.2, row.3))
     }
 
-    /// 获取资源文件路径（不检查审核状态，用于预览）
+    /// 获取资源文件路径（检查审核状态和权限，用于预览）
     /// 返回：(file_path, resource_type, storage_type, updated_at)
+    /// 非管理员只能访问已通过审核的资源
     pub async fn get_resource_file_path_for_preview(
         pool: &PgPool,
         resource_id: Uuid,
+        user: &CurrentUser,
     ) -> Result<(String, String, Option<String>, chrono::NaiveDateTime), ResourceError> {
-        let row: (String, String, Option<String>, chrono::NaiveDateTime) =
-            sqlx::query_as("SELECT file_path, resource_type, storage_type, updated_at FROM resources WHERE id = $1")
+        // 获取资源信息，包括审核状态和上传者
+        let row: (String, String, Option<String>, chrono::NaiveDateTime, String, Uuid) =
+            sqlx::query_as("SELECT file_path, resource_type, storage_type, updated_at, audit_status, uploader_id FROM resources WHERE id = $1")
                 .bind(resource_id)
                 .fetch_optional(pool)
                 .await
                 .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
                 .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
 
-        Ok(row)
+        let audit_status = row.4;
+        let uploader_id = row.5;
+
+        // 检查权限：非管理员且非上传者时，只能访问已通过审核的资源
+        let is_admin = matches!(user.role, crate::models::UserRole::Admin);
+        let is_uploader = user.id == uploader_id;
+
+        if audit_status != "approved" && !is_admin && !is_uploader {
+            return Err(ResourceError::Unauthorized(
+                "该资源尚未通过审核，无法预览".to_string(),
+            ));
+        }
+
+        Ok((row.0, row.1, row.2, row.3))
     }
 
     /// 记录下载日志
