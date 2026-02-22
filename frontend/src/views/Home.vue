@@ -23,11 +23,24 @@
             <span class="guest-text">欢迎访问，点击登录 / 注册</span>
           </div>
 
-          <!-- 日历（右侧，拉长） -->
-          <div class="calendar-box">
-            <el-icon :size="18"><Calendar /></el-icon>
-            <span class="calendar-date">{{ todayDate }}</span>
-            <span class="calendar-weekday">{{ todayWeekday }}</span>
+          <!-- 日历 + 统计（白色底，左侧统计，右侧日期） -->
+          <div class="calendar-box" v-loading="loadingStats">
+            <div class="calendar-stats">
+              <div class="stat-item">
+                <span class="stat-number">{{ stats.totalResources }}</span>
+                <span class="stat-label">份资源</span>
+              </div>
+              <div class="stat-divider"></div>
+              <div class="stat-item">
+                <span class="stat-number">{{ stats.totalCourses }}</span>
+                <span class="stat-label">门课程</span>
+              </div>
+            </div>
+            <div class="calendar-info">
+              <el-icon :size="18"><Calendar /></el-icon>
+              <span class="calendar-date">{{ todayDate }}</span>
+              <span class="calendar-weekday">{{ todayWeekday }}</span>
+            </div>
           </div>
         </div>
 
@@ -174,7 +187,8 @@
 import { ref, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
-import { getHotResources } from '../api/resource';
+import { getHotResources, getResourceList } from '../api/resource';
+import { getCourses } from '../api/course';
 import type { HotResourceItem } from '../types/resource';
 import { ResourceTypeLabels } from '../types/resource';
 import {
@@ -195,6 +209,11 @@ const authStore = useAuthStore();
 const searchKeyword = ref('');
 const hotResources = ref<HotResourceItem[]>([]);
 const loadingHot = ref(false);
+const stats = ref({
+  totalResources: 0,
+  totalCourses: 0
+});
+const loadingStats = ref(false);
 
 // 获取当前日期
 const today = new Date();
@@ -242,13 +261,30 @@ const formatNumber = (num: number): string => {
   return num.toString();
 };
 
+// 获取统计数据
+const fetchStats = async () => {
+  loadingStats.value = true;
+  try {
+    const [resourceRes, courseRes] = await Promise.all([
+      getResourceList({ page: 1, perPage: 1 }),
+      getCourses()
+    ]);
+    stats.value.totalResources = resourceRes.total || 0;
+    stats.value.totalCourses = courseRes.length || 0;
+  } catch (error) {
+    console.error('获取统计数据失败:', error);
+  } finally {
+    loadingStats.value = false;
+  }
+};
+
 // 获取热门资源
 const fetchHotResources = async () => {
   loadingHot.value = true;
   hotResources.value = [];
   try {
     console.log('开始获取热门资源...');
-    const result = await getHotResources(10);
+    const result = await getHotResources(5);
     console.log('热门资源API返回:', result);
     
     if (result && Array.isArray(result)) {
@@ -286,6 +322,7 @@ const goToResource = (id: string) => {
 };
 
 onMounted(() => {
+  fetchStats();
   fetchHotResources();
 });
 </script>
@@ -376,18 +413,55 @@ onMounted(() => {
   font-weight: 500;
 }
 
-/* 日历（右侧，拉长占满剩余空间） */
+/* 日历（白色底，左侧统计，右侧日期） */
 .calendar-box {
   flex: 1;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 24px;
   padding: 12px 24px;
   background: #fff;
   border-radius: 12px;
   border: 1px solid #ebeef5;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.calendar-stats {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.calendar-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.stat-number {
+  font-size: 22px;
+  font-weight: 700;
+  color: #606266;
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: #909399;
+  font-weight: 500;
+}
+
+.stat-divider {
+  width: 1px;
+  height: 22px;
+  background: #e4e7ed;
 }
 
 .calendar-box .el-icon {
