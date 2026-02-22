@@ -66,6 +66,7 @@ struct ResourceUploadCallbackRequest {
     description: Option<String>,
     teacher_sns: Option<Vec<i64>>,
     course_sns: Option<Vec<i64>>,
+    related_resource_ids: Option<Vec<Uuid>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -233,6 +234,7 @@ async fn resource_upload_callback(
         description: payload.description.clone(),
         teacher_sns: payload.teacher_sns.clone(),
         course_sns: payload.course_sns.clone(),
+        related_resource_ids: payload.related_resource_ids.clone(),
     };
 
     match ResourceService::create_resource_from_oss_callback(

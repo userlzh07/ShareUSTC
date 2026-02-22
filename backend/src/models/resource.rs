@@ -420,6 +420,17 @@ pub struct CourseInfo {
     pub credits: Option<f64>,
 }
 
+/// 关联资源信息（简要信息，用于资源详情页展示）
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedResourceInfo {
+    pub id: Uuid,
+    pub title: String,
+    pub resource_type: String,
+    pub category: String,
+    pub created_at: chrono::NaiveDateTime,
+}
+
 /// 资源上传请求 DTO
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -436,6 +447,8 @@ pub struct UploadResourceRequest {
     pub teacher_sns: Option<Vec<i64>>,
     /// 关联课程编号列表（可选）
     pub course_sns: Option<Vec<i64>>,
+    /// 关联资源ID列表（可选）
+    pub related_resource_ids: Option<Vec<Uuid>>,
 }
 
 impl UploadResourceRequest {
@@ -500,6 +513,8 @@ pub struct ResourceDetailResponse {
     pub teachers: Vec<TeacherInfo>,
     /// 关联的课程列表
     pub courses: Vec<CourseInfo>,
+    /// 关联的资源列表（该资源主动关联的其他资源）
+    pub related_resources: Vec<RelatedResourceInfo>,
     /// 存储类型：local 或 oss
     pub storage_type: String,
 }
@@ -621,6 +636,18 @@ pub struct AiAuditResult {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateResourceContentRequest {
     pub content: String,
+}
+
+/// 更新资源关联信息请求 DTO
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateResourceRelationsRequest {
+    /// 关联教师编号列表
+    pub teacher_sns: Vec<i64>,
+    /// 关联课程编号列表
+    pub course_sns: Vec<i64>,
+    /// 关联资源ID列表
+    pub related_resource_ids: Vec<Uuid>,
 }
 
 impl UpdateResourceContentRequest {

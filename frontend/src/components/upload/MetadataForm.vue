@@ -110,6 +110,38 @@
       />
     </el-form-item>
 
+    <!-- 关联资源选择 -->
+    <el-form-item label="关联资源">
+      <div class="resource-relation-selector">
+        <el-select
+          v-model="form.relatedResourceIds"
+          multiple
+          filterable
+          remote
+          clearable
+          placeholder="搜索资源名称或UUID进行关联（可选）"
+          style="width: 100%"
+          :remote-method="searchResources"
+          :loading="searching"
+        >
+          <el-option
+            v-for="resource in searchResults"
+            :key="resource.id"
+            :label="resource.title"
+            :value="resource.id"
+          >
+            <div class="resource-option">
+              <span class="resource-title">{{ resource.title }}</span>
+              <el-tag size="small" :type="getResourceTypeTagType(resource.resourceType)">
+                {{ ResourceTypeLabels[resource.resourceType as keyof typeof ResourceTypeLabels] || resource.resourceType }}
+              </el-tag>
+            </div>
+          </el-option>
+        </el-select>
+        <div class="form-tip">搜索并选择要关联的资源，可多选。关联后可在资源详情页查看相关资源</div>
+      </div>
+    </el-form-item>
+
     <el-form-item v-if="resourceType" label="资源类型">
       <el-tag :type="getResourceTypeTagType(resourceType)">
         {{ ResourceTypeLabels[resourceType] || resourceType }}
@@ -129,8 +161,10 @@ import {
 } from '../../types/resource';
 import { getTeachers } from '../../api/teacher';
 import { getCourses } from '../../api/course';
+import { searchResourcesForRelation } from '../../api/resource';
 import type { Teacher } from '../../types/teacher';
 import type { Course } from '../../types/course';
+import type { RelatedResourceItem } from '../../types/resource';
 
 interface FormData {
   title: string;
@@ -140,6 +174,7 @@ interface FormData {
   description: string;
   teacherSns: number[];
   courseSns: number[];
+  relatedResourceIds: string[];
 }
 
 const props = defineProps<{
@@ -160,7 +195,8 @@ const form = reactive<FormData>({
   tags: props.modelValue.tags || [],
   description: props.modelValue.description || '',
   teacherSns: props.modelValue.teacherSns || [],
-  courseSns: props.modelValue.courseSns || []
+  courseSns: props.modelValue.courseSns || [],
+  relatedResourceIds: props.modelValue.relatedResourceIds || []
 });
 
 // 教师列表
@@ -170,6 +206,36 @@ const loadingTeachers = ref(false);
 // 课程列表
 const courses = ref<Course[]>([]);
 const loadingCourses = ref(false);
+
+// 资源关联搜索
+const searchResults = ref<RelatedResourceItem[]>([]);
+const searching = ref(false);
+let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+
+// 搜索资源（防抖）
+const searchResources = (query: string) => {
+  if (searchTimeout) {
+    clearTimeout(searchTimeout);
+  }
+
+  searchTimeout = setTimeout(async () => {
+    if (!query.trim()) {
+      searchResults.value = [];
+      return;
+    }
+
+    searching.value = true;
+    try {
+      const results = await searchResourcesForRelation(query.trim(), undefined, 20);
+      searchResults.value = results;
+    } catch (error) {
+      console.error('搜索资源失败', error);
+      searchResults.value = [];
+    } finally {
+      searching.value = false;
+    }
+  }, 300);
+};
 
 // 加载教师列表
 const loadTeachers = async () => {
@@ -217,7 +283,7 @@ const rules: FormRules = {
 };
 
 // 获取资源类型标签类型
-const getResourceTypeTagType = (type: ResourceTypeType) => {
+const getResourceTypeTagType = (type: string) => {
   const typeMap: Record<string, string> = {
     pdf: 'danger',
     ppt: 'warning',
@@ -250,6 +316,7 @@ watch(
     form.description = newValue.description || '';
     form.teacherSns = newValue.teacherSns || [];
     form.courseSns = newValue.courseSns || [];
+    form.relatedResourceIds = newValue.relatedResourceIds || [];
   },
   { deep: true }
 );
@@ -290,5 +357,23 @@ defineExpose({
 
 :deep(.el-form-item__label) {
   font-weight: 500;
+}
+
+.resource-relation-selector {
+  width: 100%;
+}
+
+.resource-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resource-option .resource-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

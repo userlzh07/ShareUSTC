@@ -110,6 +110,8 @@ export interface ResourceDetail {
   // 授课教师和课程关联
   teachers?: TeacherInfo[];
   courses?: CourseInfo[];
+  // 关联的资源列表（该资源主动关联的其他资源）
+  relatedResources?: RelatedResourceItem[];
   storageType: StorageType;
 }
 
@@ -126,6 +128,15 @@ export interface CourseInfo {
   name: string;
   semester?: string;
   credits?: number;
+}
+
+// 关联资源信息（简要信息）
+export interface RelatedResourceItem {
+  id: string;
+  title: string;
+  resourceType: string;
+  category: string;
+  createdAt: string;
 }
 
 // 资源列表响应
@@ -173,6 +184,8 @@ export interface UploadResourceRequest {
   description?: string;
   teacherSns?: number[];
   courseSns?: number[];
+  /** 关联资源ID列表（可选） */
+  relatedResourceIds?: string[];
 }
 
 // 上传资源响应

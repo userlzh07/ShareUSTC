@@ -784,6 +784,49 @@ EXCEPTION
 END $$;
 
 -- ============================================
+-- 18. 资源关联表（资源与资源之间的单向关联关系）
+-- ============================================
+CREATE TABLE IF NOT EXISTS resource_relations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+DO $$
+BEGIN
+    -- source_resource_id: 源资源ID（主动关联其他资源的资源）
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'resource_relations' AND column_name = 'source_resource_id') THEN
+        IF EXISTS (SELECT 1 FROM resource_relations LIMIT 1) THEN
+            ALTER TABLE resource_relations ADD COLUMN source_resource_id UUID REFERENCES resources(id) ON DELETE CASCADE;
+        ELSE
+            ALTER TABLE resource_relations ADD COLUMN source_resource_id UUID NOT NULL REFERENCES resources(id) ON DELETE CASCADE DEFAULT '00000000-0000-0000-0000-000000000000';
+        END IF;
+    END IF;
+
+    -- target_resource_id: 目标资源ID（被关联的资源）
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'resource_relations' AND column_name = 'target_resource_id') THEN
+        IF EXISTS (SELECT 1 FROM resource_relations LIMIT 1) THEN
+            ALTER TABLE resource_relations ADD COLUMN target_resource_id UUID REFERENCES resources(id) ON DELETE CASCADE;
+        ELSE
+            ALTER TABLE resource_relations ADD COLUMN target_resource_id UUID NOT NULL REFERENCES resources(id) ON DELETE CASCADE DEFAULT '00000000-0000-0000-0000-000000000000';
+        END IF;
+    END IF;
+END $$;
+
+-- 添加唯一约束：防止重复关联
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'resource_relations_source_target_key' AND conrelid = 'resource_relations'::regclass
+    ) THEN
+        ALTER TABLE resource_relations ADD CONSTRAINT resource_relations_source_target_key UNIQUE (source_resource_id, target_resource_id);
+    END IF;
+EXCEPTION
+    WHEN unique_violation THEN
+        RAISE NOTICE '无法添加唯一约束：存在重复数据';
+END $$;
+
+-- ============================================
 -- 为现有用户分配 sn（增量更新支持）
 -- ============================================
 DO $$
@@ -853,6 +896,10 @@ CREATE INDEX IF NOT EXISTS idx_resource_teachers_resource ON resource_teachers(r
 CREATE INDEX IF NOT EXISTS idx_resource_teachers_teacher ON resource_teachers(teacher_sn);
 CREATE INDEX IF NOT EXISTS idx_resource_courses_resource ON resource_courses(resource_id);
 CREATE INDEX IF NOT EXISTS idx_resource_courses_course ON resource_courses(course_sn);
+
+-- 资源关联表索引
+CREATE INDEX IF NOT EXISTS idx_resource_relations_source ON resource_relations(source_resource_id);
+CREATE INDEX IF NOT EXISTS idx_resource_relations_target ON resource_relations(target_resource_id);
 
 -- ============================================
 -- 创建触发器
@@ -939,7 +986,9 @@ SELECT 'courses', COUNT(*) FROM information_schema.columns WHERE table_name = 'c
 UNION ALL
 SELECT 'resource_teachers', COUNT(*) FROM information_schema.columns WHERE table_name = 'resource_teachers'
 UNION ALL
-SELECT 'resource_courses', COUNT(*) FROM information_schema.columns WHERE table_name = 'resource_courses';
+SELECT 'resource_courses', COUNT(*) FROM information_schema.columns WHERE table_name = 'resource_courses'
+UNION ALL
+SELECT 'resource_relations', COUNT(*) FROM information_schema.columns WHERE table_name = 'resource_relations';
 '''
 
 
@@ -1183,8 +1232,9 @@ def main():
     print("  - courses (课程表)")
     print("  - resource_teachers (资源教师关联表)")
     print("  - resource_courses (资源课程关联表)")
+    print("  - resource_relations (资源关联表)")
     print()
-    print("索引: 40+")
+    print("索引: 42+")
     print("触发器: 6 (自动更新 updated_at)")
     print()
     print("说明: 此脚本支持增量更新，可重复执行。")

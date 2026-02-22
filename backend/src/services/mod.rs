@@ -36,4 +36,4 @@ pub use teacher_service::*;
 pub use user_service::*;
 
 // 从 resource_service 重新导出关联信息结构体
-pub use crate::models::resource::{CourseInfo, TeacherInfo};
+pub use crate::models::resource::{CourseInfo, RelatedResourceInfo, TeacherInfo};

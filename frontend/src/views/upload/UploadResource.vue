@@ -211,7 +211,8 @@ const metadata = ref({
   tags: [] as string[],
   description: '',
   teacherSns: [] as number[],
-  courseSns: [] as number[]
+  courseSns: [] as number[],
+  relatedResourceIds: [] as string[]
 });
 
 // 上传状态
@@ -312,7 +313,8 @@ const handleUpload = async () => {
       tags: metadata.value.tags.length > 0 ? metadata.value.tags : undefined,
       description: metadata.value.description || undefined,
       teacherSns: metadata.value.teacherSns.length > 0 ? metadata.value.teacherSns : undefined,
-      courseSns: metadata.value.courseSns.length > 0 ? metadata.value.courseSns : undefined
+      courseSns: metadata.value.courseSns.length > 0 ? metadata.value.courseSns : undefined,
+      relatedResourceIds: metadata.value.relatedResourceIds.length > 0 ? metadata.value.relatedResourceIds : undefined
     };
 
     const response = await uploadResource(
@@ -368,6 +370,7 @@ const resetAndUpload = () => {
   metadata.value.description = '';
   metadata.value.teacherSns = [];
   metadata.value.courseSns = [];
+  metadata.value.relatedResourceIds = [];
   uploadProgress.value = 0;
   auditStatus.value = 'checking';
   auditMessage.value = '';
