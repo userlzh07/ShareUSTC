@@ -1307,9 +1307,9 @@ pub async fn update_resource_relations(
         }
     };
 
-    // 检查权限（只有上传者可以修改）
-    if resource_detail.uploader_id != user.id {
-        return forbidden("只有资源上传者可以修改关联信息");
+    // 检查权限（上传者或管理员可以修改）
+    if resource_detail.uploader_id != user.id && user.role != crate::models::UserRole::Admin {
+        return forbidden("只有资源上传者或管理员可以修改关联信息");
     }
 
     match ResourceService::update_resource_relations(

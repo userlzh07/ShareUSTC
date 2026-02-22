@@ -173,6 +173,20 @@
         <h2>更新日志</h2>
         <div class="changelog-list">
           <div class="changelog-item">
+            <div class="changelog-date">2026-02-22</div>
+            <div class="changelog-content">
+              <span class="changelog-tag tag-improve">功能优化</span>
+              <span class="changelog-text">允许用户修改资源信息和删除评论</span>
+            </div>
+          </div>
+          <div class="changelog-item">
+            <div class="changelog-date">2026-02-22</div>
+            <div class="changelog-content">
+              <span class="changelog-tag tag-feature">新增功能</span>
+              <span class="changelog-text">新增设置关联资源的功能</span>
+            </div>
+          </div>
+          <div class="changelog-item">
             <div class="changelog-date">2026-02-21</div>
             <div class="changelog-content">
               <span class="changelog-tag tag-feature">新增功能</span>
@@ -183,7 +197,7 @@
             <div class="changelog-date">2026-02-20</div>
             <div class="changelog-content">
               <span class="changelog-tag tag-improve">功能优化</span>
-              <span class="changelog-text">将文件预览改为从 oss 读取；在浏览器侧缓存文件资源，降低服务器带宽消耗 </span>
+              <span class="changelog-text">将文件预览改为从 oss 读取；在浏览器侧缓存文件资源，降低服务器带宽消耗</span>
             </div>
           </div>
           <div class="changelog-item">
@@ -218,7 +232,7 @@
             <div class="changelog-date">2026-02-13</div>
             <div class="changelog-content">
               <span class="changelog-tag tag-improve">功能优化</span>
-              <span class="changelog-text">将凭据的存储方由 local storage 改为 cookie </span>
+              <span class="changelog-text">将凭据的存储方由 local storage 改为 cookie</span>
             </div>
           </div>
           <div class="changelog-item">

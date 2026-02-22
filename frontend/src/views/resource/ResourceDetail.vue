@@ -390,10 +390,10 @@ const canDelete = computed(() => {
   return resource.value.uploaderId === authStore.user.id || authStore.user.role === 'admin';
 });
 
-// 是否可以修改关联信息（只有上传者可以修改）
+// 是否可以修改关联信息（上传者或管理员可以修改）
 const canEditRelations = computed(() => {
   if (!resource.value || !authStore.user) return false;
-  return resource.value.uploaderId === authStore.user.id;
+  return resource.value.uploaderId === authStore.user.id || authStore.user.role === 'admin';
 });
 
 // 是否可以编辑（Markdown资源且是上传者或管理员）
