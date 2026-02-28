@@ -19,6 +19,8 @@
             placeholder="请输入用户名 (3-50个字符)"
             :prefix-icon="User"
             size="large"
+            autocomplete="off"
+            data-lpignore="true"
           />
         </el-form-item>
 
@@ -28,6 +30,8 @@
             placeholder="请输入邮箱"
             :prefix-icon="Message"
             size="large"
+            autocomplete="off"
+            data-lpignore="true"
           />
         </el-form-item>
 
@@ -39,6 +43,8 @@
             :prefix-icon="Lock"
             size="large"
             show-password
+            autocomplete="new-password"
+            data-lpignore="true"
             @input="checkPasswordStrength"
           />
           <div class="password-strength" v-if="form.password">
@@ -62,6 +68,8 @@
             :prefix-icon="Lock"
             size="large"
             show-password
+            autocomplete="new-password"
+            data-lpignore="true"
           />
         </el-form-item>
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::services::{create_local_storage, StorageBackend, StorageBackendType};
+use crate::services::{create_local_storage, ResourceService, StorageBackend, StorageBackendType};
 
 /// 计算平均分辅助函数
 fn calc_avg(total: Option<i32>, count: Option<i32>) -> Option<f64> {
@@ -123,6 +123,11 @@ impl FavoriteService {
         favorite_id: Uuid,
         user_id: Uuid,
     ) -> Result<FavoriteDetailResponse, ResourceError> {
+        log::debug!(
+            "[FavoriteService] 获取收藏夹详情 | favorite_id={}, user_id={}",
+            favorite_id, user_id
+        );
+
         // 验证收藏夹所有权
         let favorite =
             sqlx::query_as::<_, Favorite>("SELECT * FROM favorites WHERE id = $1 AND user_id = $2")
@@ -133,11 +138,23 @@ impl FavoriteService {
 
         let favorite = match favorite {
             Some(f) => f,
-            None => return Err(ResourceError::NotFound("收藏夹不存在".to_string())),
+            None => {
+                log::warn!(
+                    "[FavoriteService] 收藏夹不存在或无权限 | favorite_id={}, user_id={}",
+                    favorite_id, user_id
+                );
+                return Err(ResourceError::NotFound("收藏夹不存在".to_string()));
+            }
         };
 
+        log::debug!(
+            "[FavoriteService] 找到收藏夹 | favorite_id={}, name={}",
+            favorite.id, favorite.name
+        );
+
         // 获取收藏夹中的资源列表
-        let rows = sqlx::query!(
+        // 获取收藏夹中的资源列表
+        let rows = match sqlx::query!(
             r#"
             SELECT
                 r.id,
@@ -170,7 +187,26 @@ impl FavoriteService {
             favorite_id
         )
         .fetch_all(pool)
-        .await?;
+        .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                log::error!(
+                    "[FavoriteService] 查询收藏夹资源失败 | favorite_id={}, error={}",
+                    favorite_id, e
+                );
+                return Err(ResourceError::DatabaseError(format!(
+                    "查询收藏夹资源失败: {}",
+                    e
+                )));
+            }
+        };
+
+        log::debug!(
+            "[FavoriteService] 获取到 {} 个资源 | favorite_id={}",
+            rows.len(),
+            favorite_id
+        );
 
         let resources: Vec<FavoriteResourceItem> = rows
             .into_iter()
@@ -207,8 +243,8 @@ impl FavoriteService {
                     id: row.id,
                     title: row.title,
                     course_name: row.course_name,
-                    resource_type: row.resource_type.unwrap_or_default(),
-                    category: row.category.unwrap_or_default(),
+                    resource_type: row.resource_type,
+                    category: row.category,
                     tags,
                     file_size: row.file_size,
                     added_at: row
@@ -653,6 +689,14 @@ impl FavoriteService {
                     file_name,
                     file_content.len()
                 );
+
+                // 增加资源下载计数
+                if let Err(e) = ResourceService::increment_downloads(pool, *resource_id).await {
+                    log::warn!(
+                        "增加资源下载计数失败: resource_id={}, error={}",
+                        resource_id, e
+                    );
+                }
             }
 
             // 完成 ZIP 文件

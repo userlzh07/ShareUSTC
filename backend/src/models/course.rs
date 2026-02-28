@@ -17,29 +17,6 @@ pub struct Course {
     pub updated_at: NaiveDateTime,
 }
 
-/// 课程响应 DTO
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CourseResponse {
-    pub sn: i64,
-    pub name: String,
-    pub semester: Option<String>,
-    pub credits: Option<f64>,
-    pub is_active: bool,
-}
-
-impl From<Course> for CourseResponse {
-    fn from(course: Course) -> Self {
-        Self {
-            sn: course.sn,
-            name: course.name,
-            semester: course.semester,
-            credits: course.credits,
-            is_active: course.is_active,
-        }
-    }
-}
-
 /// 创建课程请求 DTO
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -173,5 +150,31 @@ pub struct BatchImportCoursesResult {
 #[serde(rename_all = "camelCase")]
 pub struct FailedCourseImportItem {
     pub name: String,
+    pub reason: String,
+}
+
+/// 批量删除课程请求 DTO
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDeleteCoursesRequest {
+    /// 编号列表，格式如 "1,2-10,100-200,344"
+    pub sns: String,
+}
+
+/// 批量删除课程结果
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDeleteCoursesResult {
+    pub success_count: i32,
+    pub fail_count: i32,
+    pub not_found_count: i32,
+    pub failed_items: Vec<FailedCourseDeleteItem>,
+}
+
+/// 删除失败的课程项
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedCourseDeleteItem {
+    pub sn: i64,
     pub reason: String,
 }

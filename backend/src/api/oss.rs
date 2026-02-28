@@ -66,6 +66,7 @@ struct ResourceUploadCallbackRequest {
     description: Option<String>,
     teacher_sns: Option<Vec<i64>>,
     course_sns: Option<Vec<i64>>,
+    related_resource_ids: Option<Vec<Uuid>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -233,6 +234,7 @@ async fn resource_upload_callback(
         description: payload.description.clone(),
         teacher_sns: payload.teacher_sns.clone(),
         course_sns: payload.course_sns.clone(),
+        related_resource_ids: payload.related_resource_ids.clone(),
     };
 
     match ResourceService::create_resource_from_oss_callback(
@@ -325,11 +327,27 @@ async fn image_upload_callback(
 }
 
 fn key_in_scope(key: &str, scope: &str) -> bool {
+    // 使用 Path 规范化进行更稳健的路径验证
     let normalized = key.trim_start_matches('/');
-    // 严格检查：路径必须以 scope 目录开头
-    // 防止路径遍历如：resources/../malicious.exe 或 evil/resources/../../data
-    let parts: Vec<&str> = normalized.split('/').collect();
-    parts.get(0) == Some(&scope)
+
+    // 检查是否包含路径遍历字符序列
+    if normalized.contains("..") || normalized.contains("//") {
+        return false;
+    }
+
+    // 使用 std::path::Path 进行规范化处理
+    let path = std::path::Path::new(normalized);
+
+    // 获取路径的第一个组件
+    if let Some(first_component) = path.components().next() {
+        if let std::path::Component::Normal(first) = first_component {
+            if let Some(first_str) = first.to_str() {
+                return first_str == scope;
+            }
+        }
+    }
+
+    false
 }
 
 fn pick_extension(folder: &str, file_name: &str, content_type: Option<&str>) -> Option<String> {

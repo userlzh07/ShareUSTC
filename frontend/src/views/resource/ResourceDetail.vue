@@ -75,6 +75,11 @@
                 </el-button>
               </el-tooltip>
 
+              <el-button v-if="canEditRelations" size="large" @click="showEditRelations = true">
+                <el-icon><Link /></el-icon>
+                修改信息
+              </el-button>
+
               <el-button v-if="canEdit" size="large" type="success" @click="handleEdit">
                 <el-icon><Edit /></el-icon>
                 编辑
@@ -197,12 +202,54 @@
               </div>
             </el-card>
 
+            <!-- 关联资源 -->
+            <el-card v-if="resource.relatedResources && resource.relatedResources.length > 0" class="related-resources-card" shadow="never">
+              <template #header>
+                <span>关联资源</span>
+              </template>
+              <div class="related-resources-list">
+                <div
+                  v-for="relatedResource in resource.relatedResources"
+                  :key="relatedResource.id"
+                  class="related-resource-item"
+                  @click="goToResourceDetail(relatedResource.id)"
+                >
+                  <div class="related-resource-icon">
+                    <el-icon><Document /></el-icon>
+                  </div>
+                  <div class="related-resource-info">
+                    <div class="related-resource-title">{{ relatedResource.title }}</div>
+                    <div class="related-resource-meta">
+                      <el-tag size="small" :type="getResourceTypeTagType(relatedResource.resourceType)">
+                        {{ ResourceTypeLabels[relatedResource.resourceType as ResourceTypeType] || relatedResource.resourceType }}
+                      </el-tag>
+                      <span class="related-resource-category">
+                        {{ ResourceCategoryLabels[relatedResource.category as ResourceCategoryType] || relatedResource.category }}
+                      </span>
+                    </div>
+                  </div>
+                  <el-icon class="related-resource-arrow"><ArrowRight /></el-icon>
+                </div>
+              </div>
+            </el-card>
+
             <!-- 资源信息 -->
             <el-card class="info-card" shadow="never">
               <template #header>
                 <span>资源信息</span>
               </template>
               <div class="info-list">
+                <div class="info-item">
+                  <span class="info-label">资源ID</span>
+                  <span
+                    class="info-value uuid-container copyable"
+                    :title="resource.id + ' (点击复制)'"
+                    @click="copyResourceId(resource.id)"
+                  >
+                    <span class="uuid-text">{{ resource.id }}</span>
+                    <el-icon class="copy-icon"><CopyDocument /></el-icon>
+                  </span>
+                </div>
                 <div class="info-item">
                   <span class="info-label">文件大小</span>
                   <span class="info-value">{{ formatFileSize(resource.fileSize) }}</span>
@@ -241,6 +288,17 @@
         :resource-id="resourceId"
         @success="onAddToFavoriteSuccess"
       />
+
+      <!-- 修改关联信息弹窗 -->
+      <EditResourceRelationsModal
+        v-if="resource"
+        v-model="showEditRelations"
+        :resource-id="resourceId"
+        :initial-teachers="resource.teachers?.map(t => t.sn) || []"
+        :initial-courses="resource.courses?.map(c => c.sn) || []"
+        :initial-related-resources="resource.relatedResources?.map(r => r.id) || []"
+        @success="handleRelationsUpdated"
+      />
     </template>
   </div>
 </template>
@@ -260,7 +318,11 @@ import {
   Folder,
   Loading,
   Edit,
-  User
+  User,
+  CopyDocument,
+  Document,
+  ArrowRight,
+  Link
 } from '@element-plus/icons-vue';
 import { getResourceDetail, downloadResource, deleteResource } from '../../api/resource';
 import { checkResourceInFavorite } from '../../api/favorite';
@@ -272,13 +334,15 @@ import LikeButton from '../../components/interaction/LikeButton.vue';
 import CommentSection from '../../components/interaction/CommentSection.vue';
 import AddToFavoriteModal from '../../components/favorite/AddToFavoriteModal.vue';
 import RatingWidget from '../../components/interaction/RatingWidget.vue';
+import EditResourceRelationsModal from '../../components/resource/EditResourceRelationsModal.vue';
 import {
   ResourceTypeLabels,
   ResourceCategoryLabels,
   StorageTypeLabels,
   formatFileSize,
   type ResourceDetail,
-  type ResourceCategoryType
+  type ResourceCategoryType,
+  type ResourceTypeType
 } from '../../types/resource';
 import type { ResourceRatingInfo } from '../../types/rating';
 
@@ -293,6 +357,7 @@ const loading = ref(true);
 const downloading = ref(false);
 const resource = ref<ResourceDetail | null>(null);
 const showAddToFavorite = ref(false);
+const showEditRelations = ref(false);
 const addingToDefault = ref(false);
 const isInDefaultFavorite = ref(false); // 资源是否已在默认收藏夹中
 const checkingDefaultStatus = ref(false); // 正在检查默认收藏夹状态
@@ -321,6 +386,12 @@ const tooltipContent = computed(() => {
 });
 
 const canDelete = computed(() => {
+  if (!resource.value || !authStore.user) return false;
+  return resource.value.uploaderId === authStore.user.id || authStore.user.role === 'admin';
+});
+
+// 是否可以修改关联信息（上传者或管理员可以修改）
+const canEditRelations = computed(() => {
   if (!resource.value || !authStore.user) return false;
   return resource.value.uploaderId === authStore.user.id || authStore.user.role === 'admin';
 });
@@ -401,6 +472,44 @@ const checkDefaultFavoriteStatus = async () => {
 // 评分更新回调
 const onRatingUpdate = (_info: ResourceRatingInfo) => {
   // 评分信息已在组件内部更新，这里可以添加额外的处理
+};
+
+// 跳转到指定资源详情页（在新标签页打开并聚焦）
+const goToResourceDetail = (id: string) => {
+  const url = `${window.location.origin}/resources/${id}`;
+  const newWindow = window.open(url, '_blank');
+  if (newWindow) {
+    newWindow.focus();
+  }
+};
+
+// 关联信息更新成功回调
+const handleRelationsUpdated = () => {
+  // 重新加载资源详情
+  loadResourceDetail();
+};
+
+// 复制资源ID到剪贴板
+const copyResourceId = async (id: string) => {
+  try {
+    await navigator.clipboard.writeText(id);
+    ElMessage.success('资源ID已复制到剪贴板');
+  } catch {
+    // 降级方案：如果 clipboard API 不可用，使用传统方法
+    const textArea = document.createElement('textarea');
+    textArea.value = id;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      ElMessage.success('资源ID已复制到剪贴板');
+    } catch {
+      ElMessage.error('复制失败，请手动复制');
+    }
+    document.body.removeChild(textArea);
+  }
 };
 
 // 格式化日期（服务器返回的是 UTC 时间，需要转换为本地时间显示）
@@ -669,8 +778,79 @@ onMounted(() => {
 .rating-card,
 .comments-card,
 .teachers-card,
-.courses-card {
+.courses-card,
+.related-resources-card {
   margin-bottom: 24px;
+}
+
+/* 关联资源列表样式 */
+.related-resources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.related-resource-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.related-resource-item:hover {
+  background-color: var(--el-fill-color-light);
+  border-color: var(--el-color-primary-light-5);
+}
+
+.related-resource-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background-color: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.related-resource-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.related-resource-title {
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.related-resource-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.related-resource-category {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.related-resource-arrow {
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.related-resource-item:hover .related-resource-arrow {
+  color: var(--el-color-primary);
 }
 
 /* 授课教师列表样式 */
@@ -798,6 +978,41 @@ onMounted(() => {
 
 .info-value {
   color: var(--el-text-color-primary);
+}
+
+.uuid-container {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  font-size: 12px;
+  font-family: monospace;
+  max-width: 180px;
+}
+
+.uuid-container:hover {
+  background-color: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+
+.uuid-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.copy-icon {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.uuid-container:hover .copy-icon {
+  opacity: 1;
 }
 
 .rating-content {

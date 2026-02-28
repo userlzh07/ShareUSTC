@@ -1,21 +1,16 @@
 use crate::models::resource::ResourceType;
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use uuid::Uuid;
 
 #[derive(Debug)]
 pub enum FileError {
     ValidationError(String),
-    FileSystemError(String),
-    NotFound(String),
 }
 
 impl std::fmt::Display for FileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FileError::ValidationError(msg) => write!(f, "验证错误: {}", msg),
-            FileError::FileSystemError(msg) => write!(f, "文件系统错误: {}", msg),
-            FileError::NotFound(msg) => write!(f, "未找到: {}", msg),
         }
     }
 }
@@ -27,11 +22,6 @@ pub struct FileService;
 impl FileService {
     /// 最大文件大小 (100MB)
     pub const MAX_FILE_SIZE: usize = 100 * 1024 * 1024;
-
-    /// 资源上传路径
-    pub fn get_resource_upload_path() -> String {
-        std::env::var("RESOURCE_UPLOAD_PATH").unwrap_or_else(|_| "./uploads/resources".to_string())
-    }
 
     /// 计算文件 SHA-256 哈希
     pub fn calculate_hash(data: &[u8]) -> String {
@@ -91,123 +81,6 @@ impl FileService {
         Ok(resource_type)
     }
 
-    /// 保存资源文件
-    pub async fn save_resource_file(
-        file_data: Vec<u8>,
-        resource_type: &ResourceType,
-    ) -> Result<(String, String, i64), FileError> {
-        let resource_id = Uuid::new_v4();
-        let extension = match resource_type {
-            ResourceType::WebMarkdown => "md",
-            ResourceType::Ppt => "ppt",
-            ResourceType::Pptx => "pptx",
-            ResourceType::Doc => "doc",
-            ResourceType::Docx => "docx",
-            ResourceType::Pdf => "pdf",
-            ResourceType::Txt => "txt",
-            ResourceType::Jpeg => "jpeg",
-            ResourceType::Jpg => "jpg",
-            ResourceType::Png => "png",
-            ResourceType::Zip => "zip",
-            ResourceType::Other => "bin",
-        };
-
-        let file_name = format!("{}.{}", resource_id, extension);
-        let upload_dir = Self::get_resource_upload_path();
-        let file_path = Path::new(&upload_dir).join(&file_name);
-
-        // 创建目录（如果不存在）
-        if let Some(parent) = file_path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| FileError::FileSystemError(format!("创建目录失败: {}", e)))?;
-        }
-
-        // 写入文件
-        tokio::fs::write(&file_path, &file_data)
-            .await
-            .map_err(|e| FileError::FileSystemError(format!("保存文件失败: {}", e)))?;
-
-        let file_hash = Self::calculate_hash(&file_data);
-        let file_size = file_data.len() as i64;
-
-        Ok((
-            file_path.to_string_lossy().to_string(),
-            file_hash,
-            file_size,
-        ))
-    }
-
-    /// 删除资源文件
-    pub async fn delete_resource_file(file_path: &str) -> Result<(), FileError> {
-        let path = Path::new(file_path);
-        if path.exists() {
-            tokio::fs::remove_file(path)
-                .await
-                .map_err(|e| FileError::FileSystemError(format!("删除文件失败: {}", e)))?;
-        }
-        Ok(())
-    }
-
-    /// 读取资源文件
-    pub async fn read_resource_file(file_path: &str) -> Result<Vec<u8>, FileError> {
-        let path = Path::new(file_path);
-        if !path.exists() {
-            return Err(FileError::NotFound(format!("文件不存在: {}", file_path)));
-        }
-
-        tokio::fs::read(path)
-            .await
-            .map_err(|e| FileError::FileSystemError(format!("读取文件失败: {}", e)))
-    }
-
-    /// 读取资源文件内容为字符串
-    pub async fn read_resource_file_to_string(file_path: &str) -> Result<String, FileError> {
-        let path = Path::new(file_path);
-        if !path.exists() {
-            return Err(FileError::NotFound(format!("文件不存在: {}", file_path)));
-        }
-
-        tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| FileError::FileSystemError(format!("读取文件失败: {}", e)))
-    }
-
-    /// 写入资源文件内容
-    pub async fn write_resource_file(file_path: &str, content: &[u8]) -> Result<(), FileError> {
-        let path = Path::new(file_path);
-
-        // 确保目录存在
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| FileError::FileSystemError(format!("创建目录失败: {}", e)))?;
-        }
-
-        tokio::fs::write(path, content)
-            .await
-            .map_err(|e| FileError::FileSystemError(format!("写入文件失败: {}", e)))
-    }
-
-    /// 获取文件 MIME 类型（通过文件路径）（预留接口）
-    #[allow(dead_code)]
-    pub fn get_mime_type(file_path: &str) -> String {
-        // 处理 .ext.bin 格式的文件名（如 xxx.pdf.bin）
-        let path = Path::new(file_path);
-        let file_stem = path.file_stem().and_then(|s| s.to_str());
-
-        // 如果文件名包含多个扩展名，尝试获取真实的扩展名
-        let extension = if let Some(stem) = file_stem {
-            // 检查是否还有子扩展名（如 xxx.pdf.bin 中的 .pdf）
-            let stem_path = Path::new(stem);
-            stem_path.extension().and_then(|ext| ext.to_str())
-        } else {
-            path.extension().and_then(|ext| ext.to_str())
-        };
-
-        Self::mime_type_from_extension(extension)
-    }
-
     /// 根据资源类型获取 MIME 类型
     pub fn get_mime_type_by_type(resource_type: &str) -> String {
         let resource_type_lower = resource_type.to_lowercase();
@@ -243,27 +116,6 @@ impl FileService {
             "png" => "png",
             "zip" => "zip",
             _ => "bin",
-        }
-        .to_string()
-    }
-
-    fn mime_type_from_extension(extension: Option<&str>) -> String {
-        match extension.map(|e| e.to_lowercase()).as_deref() {
-            Some("md") => "text/markdown",
-            Some("ppt") => "application/vnd.ms-powerpoint",
-            Some("pptx") => {
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            }
-            Some("doc") => "application/msword",
-            Some("docx") => {
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            }
-            Some("pdf") => "application/pdf",
-            Some("txt") => "text/plain",
-            Some("jpeg") | Some("jpg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("zip") => "application/zip",
-            _ => "application/octet-stream",
         }
         .to_string()
     }

@@ -13,7 +13,8 @@ import type {
   UpdateResourceContentRequest,
   UpdateResourceContentResponse,
   GetResourceRawContentResponse,
-  HotResourceItem
+  HotResourceItem,
+  RelatedResourceItem
 } from '../types/resource';
 
 /**
@@ -426,4 +427,72 @@ export const getHotResources = async (limit?: number): Promise<HotResourceItem[]
     method: 'get',
     params: { limit }
   }) as Promise<HotResourceItem[]>;
+};
+
+/**
+ * 获取资源总数
+ * @returns 资源总数
+ */
+export const getResourceCount = async (): Promise<{ total: number }> => {
+  return request({
+    url: '/resources/count',
+    method: 'get'
+  }) as Promise<{ total: number }>;
+};
+
+/**
+ * 搜索可关联的资源
+ * 用于在上传资源时搜索要关联的其他资源
+ * @param query 搜索关键词（支持资源名称或UUID）
+ * @param excludeId 要排除的资源ID（通常是当前正在上传的资源）
+ * @param limit 返回数量限制（默认10）
+ * @returns 可关联的资源列表
+ */
+export const searchResourcesForRelation = async (
+  query: string,
+  excludeId?: string,
+  limit?: number
+): Promise<RelatedResourceItem[]> => {
+  return request({
+    url: '/resources/search-for-relation',
+    method: 'get',
+    params: {
+      q: query,
+      excludeId,
+      limit
+    }
+  }) as Promise<RelatedResourceItem[]>;
+};
+
+/**
+ * 获取资源的关联资源列表
+ * @param resourceId 资源ID
+ * @returns 关联的资源列表
+ */
+export const getResourceRelations = async (resourceId: string): Promise<RelatedResourceItem[]> => {
+  return request({
+    url: `/resources/${resourceId}/relations`,
+    method: 'get'
+  }) as Promise<RelatedResourceItem[]>;
+};
+
+/**
+ * 更新资源关联信息
+ * @param resourceId 资源ID
+ * @param data 关联信息
+ * @returns 更新结果
+ */
+export const updateResourceRelations = async (
+  resourceId: string,
+  data: {
+    teacherSns: number[];
+    courseSns: number[];
+    relatedResourceIds: string[];
+  }
+): Promise<{ message: string }> => {
+  return request({
+    url: `/resources/${resourceId}/relations`,
+    method: 'put',
+    data
+  }) as Promise<{ message: string }>;
 };

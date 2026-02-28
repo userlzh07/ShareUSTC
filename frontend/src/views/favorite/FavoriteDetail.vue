@@ -16,6 +16,9 @@
         <p class="favorite-meta">
           共 {{ resourceCount }} 个资源 · 创建于 {{ createdAt }}
         </p>
+        <p v-if="currentFavorite?.id" class="favorite-uuid">
+          收藏夹ID: {{ currentFavorite.id }}
+        </p>
       </div>
       <div class="header-actions">
         <el-button @click="showEditModal = true">
@@ -344,6 +347,13 @@ onMounted(() => {
       margin: 0;
       color: #909399;
       font-size: 14px;
+    }
+
+    .favorite-uuid {
+      margin: 4px 0 0;
+      color: #c0c4cc;
+      font-size: 12px;
+      font-family: monospace;
     }
   }
 

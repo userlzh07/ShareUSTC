@@ -38,8 +38,6 @@ impl From<super::file_service::FileError> for ResourceError {
             super::file_service::FileError::ValidationError(msg) => {
                 ResourceError::ValidationError(msg)
             }
-            super::file_service::FileError::FileSystemError(msg) => ResourceError::FileError(msg),
-            super::file_service::FileError::NotFound(msg) => ResourceError::NotFound(msg),
         }
     }
 }
@@ -268,6 +266,31 @@ impl ResourceService {
             }
         }
 
+        // 插入资源关联记录（OSS回调）
+        if let Some(related_resource_ids) = &request.related_resource_ids {
+            for related_id in related_resource_ids {
+                // 跳过自关联
+                if *related_id == resource_id {
+                    log::warn!("[Resource] 跳过自关联 | resource_id={}", resource_id);
+                    continue;
+                }
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO resource_relations (source_resource_id, target_resource_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+                )
+                .bind(resource_id)
+                .bind(related_id)
+                .execute(&mut *tx)
+                .await {
+                    log::warn!("[Resource] 回调插入资源关联失败 | source_id={}, target_id={}, error={}", resource_id, related_id, e);
+                }
+            }
+            log::debug!(
+                "[Resource] 回调资源关联插入完成 | resource_id={}, count={}",
+                resource_id,
+                related_resource_ids.len()
+            );
+        }
+
         if let Err(e) = tx.commit().await {
             if let Err(cleanup_err) = storage.delete_file(oss_key).await {
                 log::warn!(
@@ -485,6 +508,32 @@ impl ResourceService {
             );
         }
 
+        // 插入资源关联记录
+        if let Some(related_resource_ids) = &request.related_resource_ids {
+            for related_id in related_resource_ids {
+                // 跳过自关联
+                if *related_id == resource_id {
+                    log::warn!("[Resource] 跳过自关联 | resource_id={}", resource_id);
+                    continue;
+                }
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO resource_relations (source_resource_id, target_resource_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+                )
+                .bind(resource_id)
+                .bind(related_id)
+                .execute(&mut *tx)
+                .await {
+                    log::warn!("[Resource] 插入资源关联失败 | source_id={}, target_id={}, error={}", resource_id, related_id, e);
+                    // 非关键错误，继续处理
+                }
+            }
+            log::debug!(
+                "[Resource] 资源关联插入完成 | resource_id={}, count={}",
+                resource_id,
+                related_resource_ids.len()
+            );
+        }
+
         // 提交事务
         if let Err(e) = tx.commit().await {
             log::error!(
@@ -601,6 +650,29 @@ impl ResourceService {
         })
         .unwrap_or_default();
 
+        // 获取关联的资源列表（该资源主动关联的其他资源）
+        let related_resources: Vec<super::RelatedResourceInfo> = sqlx::query_as::<_, super::RelatedResourceInfo>(
+            r#"
+            SELECT r.id, r.title, r.resource_type, r.category, r.created_at
+            FROM resources r
+            INNER JOIN resource_relations rr ON r.id = rr.target_resource_id
+            WHERE rr.source_resource_id = $1 AND r.audit_status = 'approved'
+            ORDER BY rr.created_at DESC
+            "#,
+        )
+        .bind(resource_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            log::warn!(
+                "[Resource] 获取关联资源失败 | resource_id={}, error={}",
+                resource_id,
+                e
+            );
+            e
+        })
+        .unwrap_or_default();
+
         Ok(ResourceDetailResponse {
             id: resource.id,
             title: resource.title,
@@ -629,6 +701,7 @@ impl ResourceService {
             uploader_name,
             teachers,
             courses,
+            related_resources,
             storage_type: resource.storage_type.clone().unwrap_or_else(|| "local".to_string()),
         })
     }
@@ -1236,8 +1309,7 @@ impl ResourceService {
         Ok(())
     }
 
-    /// 增加访问次数（预留接口）
-    #[allow(dead_code)]
+    /// 增加访问次数
     pub async fn increment_views(pool: &PgPool, resource_id: Uuid) -> Result<(), ResourceError> {
         sqlx::query("UPDATE resource_stats SET views = views + 1 WHERE resource_id = $1")
             .bind(resource_id)
@@ -1248,39 +1320,71 @@ impl ResourceService {
         Ok(())
     }
 
-    /// 获取资源文件路径（检查审核状态，用于下载）
+    /// 获取资源文件路径（检查审核状态和权限，用于下载）
     /// 返回：(file_path, resource_type, title, storage_type)
+    /// 非管理员只能访问已通过审核的资源
     pub async fn get_resource_file_path(
         pool: &PgPool,
         resource_id: Uuid,
+        user: &CurrentUser,
     ) -> Result<(String, String, String, Option<String>), ResourceError> {
-        let row: (String, String, String, Option<String>) = sqlx::query_as(
-            "SELECT file_path, resource_type, title, storage_type FROM resources WHERE id = $1 AND audit_status = 'approved'"
+        // 获取资源信息，包括审核状态和上传者
+        let row: (String, String, String, Option<String>, String, Uuid) = sqlx::query_as(
+            "SELECT file_path, resource_type, title, storage_type, audit_status, uploader_id FROM resources WHERE id = $1"
         )
         .bind(resource_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
-        .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在或未通过审核", resource_id)))?;
+        .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
 
-        Ok(row)
+        let audit_status = row.4;
+        let uploader_id = row.5;
+
+        // 检查权限：非管理员且非上传者时，只能访问已通过审核的资源
+        let is_admin = matches!(user.role, crate::models::UserRole::Admin);
+        let is_uploader = user.id == uploader_id;
+
+        if audit_status != "approved" && !is_admin && !is_uploader {
+            return Err(ResourceError::Unauthorized(
+                "该资源尚未通过审核，无法下载".to_string(),
+            ));
+        }
+
+        Ok((row.0, row.1, row.2, row.3))
     }
 
-    /// 获取资源文件路径（不检查审核状态，用于预览）
+    /// 获取资源文件路径（检查审核状态和权限，用于预览）
     /// 返回：(file_path, resource_type, storage_type, updated_at)
+    /// 非管理员只能访问已通过审核的资源
     pub async fn get_resource_file_path_for_preview(
         pool: &PgPool,
         resource_id: Uuid,
+        user: &CurrentUser,
     ) -> Result<(String, String, Option<String>, chrono::NaiveDateTime), ResourceError> {
-        let row: (String, String, Option<String>, chrono::NaiveDateTime) =
-            sqlx::query_as("SELECT file_path, resource_type, storage_type, updated_at FROM resources WHERE id = $1")
+        // 获取资源信息，包括审核状态和上传者
+        let row: (String, String, Option<String>, chrono::NaiveDateTime, String, Uuid) =
+            sqlx::query_as("SELECT file_path, resource_type, storage_type, updated_at, audit_status, uploader_id FROM resources WHERE id = $1")
                 .bind(resource_id)
                 .fetch_optional(pool)
                 .await
                 .map_err(|e| ResourceError::DatabaseError(e.to_string()))?
                 .ok_or_else(|| ResourceError::NotFound(format!("资源 {} 不存在", resource_id)))?;
 
-        Ok(row)
+        let audit_status = row.4;
+        let uploader_id = row.5;
+
+        // 检查权限：非管理员且非上传者时，只能访问已通过审核的资源
+        let is_admin = matches!(user.role, crate::models::UserRole::Admin);
+        let is_uploader = user.id == uploader_id;
+
+        if audit_status != "approved" && !is_admin && !is_uploader {
+            return Err(ResourceError::Unauthorized(
+                "该资源尚未通过审核，无法预览".to_string(),
+            ));
+        }
+
+        Ok((row.0, row.1, row.2, row.3))
     }
 
     /// 记录下载日志
@@ -1576,6 +1680,215 @@ impl ResourceService {
                 likes: row.try_get::<i32, _>("likes").unwrap_or(0),
             });
         }
+
+        Ok(resources)
+    }
+
+    /// 获取资源总数
+    pub async fn get_resource_count(pool: &PgPool) -> Result<i64, ResourceError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM resources")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+
+        Ok(count)
+    }
+
+    /// 更新资源关联信息
+    /// 会完全替换原有的关联信息
+    pub async fn update_resource_relations(
+        pool: &PgPool,
+        resource_id: Uuid,
+        teacher_sns: Vec<i64>,
+        course_sns: Vec<i64>,
+        related_resource_ids: Vec<Uuid>,
+    ) -> Result<(), ResourceError> {
+        // 检查资源是否存在
+        let resource_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM resources WHERE id = $1)"
+        )
+        .bind(resource_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| ResourceError::DatabaseError(e.to_string()))?;
+
+        if !resource_exists {
+            return Err(ResourceError::NotFound(format!("资源 {} 不存在", resource_id)));
+        }
+
+        // 开启事务
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| ResourceError::DatabaseError(format!("开启事务失败: {}", e)))?;
+
+        // 1. 更新教师关联 - 先删除旧的，再插入新的
+        if let Err(e) = sqlx::query("DELETE FROM resource_teachers WHERE resource_id = $1")
+            .bind(resource_id)
+            .execute(&mut *tx)
+            .await
+        {
+            let _ = tx.rollback().await;
+            return Err(ResourceError::DatabaseError(format!("删除旧教师关联失败: {}", e)));
+        }
+
+        for teacher_sn in &teacher_sns {
+            if let Err(e) = sqlx::query(
+                "INSERT INTO resource_teachers (resource_id, teacher_sn) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+            )
+            .bind(resource_id)
+            .bind(teacher_sn)
+            .execute(&mut *tx)
+            .await {
+                log::warn!(
+                    "[Resource] 插入教师关联失败 | resource_id={}, teacher_sn={}, error={}",
+                    resource_id, teacher_sn, e
+                );
+            }
+        }
+
+        // 2. 更新课程关联 - 先删除旧的，再插入新的
+        if let Err(e) = sqlx::query("DELETE FROM resource_courses WHERE resource_id = $1")
+            .bind(resource_id)
+            .execute(&mut *tx)
+            .await
+        {
+            let _ = tx.rollback().await;
+            return Err(ResourceError::DatabaseError(format!("删除旧课程关联失败: {}", e)));
+        }
+
+        for course_sn in &course_sns {
+            if let Err(e) = sqlx::query(
+                "INSERT INTO resource_courses (resource_id, course_sn) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+            )
+            .bind(resource_id)
+            .bind(course_sn)
+            .execute(&mut *tx)
+            .await {
+                log::warn!(
+                    "[Resource] 插入课程关联失败 | resource_id={}, course_sn={}, error={}",
+                    resource_id, course_sn, e
+                );
+            }
+        }
+
+        // 3. 更新资源关联 - 先删除旧的，再插入新的
+        if let Err(e) = sqlx::query("DELETE FROM resource_relations WHERE source_resource_id = $1")
+            .bind(resource_id)
+            .execute(&mut *tx)
+            .await
+        {
+            let _ = tx.rollback().await;
+            return Err(ResourceError::DatabaseError(format!("删除旧资源关联失败: {}", e)));
+        }
+
+        for related_id in &related_resource_ids {
+            // 跳过自关联
+            if *related_id == resource_id {
+                log::warn!("[Resource] 跳过自关联 | resource_id={}", resource_id);
+                continue;
+            }
+
+            if let Err(e) = sqlx::query(
+                "INSERT INTO resource_relations (source_resource_id, target_resource_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+            )
+            .bind(resource_id)
+            .bind(related_id)
+            .execute(&mut *tx)
+            .await {
+                log::warn!(
+                    "[Resource] 插入资源关联失败 | source_id={}, target_id={}, error={}",
+                    resource_id, related_id, e
+                );
+            }
+        }
+
+        // 提交事务
+        if let Err(e) = tx.commit().await {
+            return Err(ResourceError::DatabaseError(format!("提交事务失败: {}", e)));
+        }
+
+        log::info!(
+            "[Resource] 资源关联信息更新成功 | resource_id={}, teachers={}, courses={}, related_resources={}",
+            resource_id,
+            teacher_sns.len(),
+            course_sns.len(),
+            related_resource_ids.len()
+        );
+
+        Ok(())
+    }
+
+    /// 搜索可关联的资源
+    /// 用于在上传资源时搜索要关联的其他资源
+    /// 排除当前资源（如果提供了 exclude_id）
+    /// 只返回已通过审核的资源
+    pub async fn search_resources_for_relation(
+        pool: &PgPool,
+        query: &str,
+        exclude_id: Option<Uuid>,
+        limit: i32,
+    ) -> Result<Vec<crate::models::RelatedResourceInfo>, ResourceError> {
+        let limit = limit.max(1).min(20);
+        let search_pattern = format!("%{}%", query);
+
+        let mut builder = sqlx::QueryBuilder::new(
+            r#"
+            SELECT r.id, r.title, r.resource_type, r.category, r.created_at
+            FROM resources r
+            WHERE r.audit_status = 'approved'
+            AND (r.title ILIKE
+            "#
+        );
+        builder.push_bind(&search_pattern);
+        builder.push(" OR r.id::text = ");
+        builder.push_bind(query);  // 支持通过UUID精确搜索
+        builder.push(")");
+
+        // 排除指定资源（避免自关联或已关联的）
+        if let Some(exclude) = exclude_id {
+            builder.push(" AND r.id != ");
+            builder.push_bind(exclude);
+        }
+
+        // 添加排序和限制
+        builder.push(" ORDER BY r.created_at DESC LIMIT ");
+        builder.push_bind(limit as i64);
+
+        let resources = builder
+            .build_query_as::<crate::models::RelatedResourceInfo>()
+            .fetch_all(pool)
+            .await
+            .map_err(|e| {
+                log::warn!("[Resource] 搜索可关联资源失败 | query={}, error={}", query, e);
+                ResourceError::DatabaseError(e.to_string())
+            })?;
+
+        Ok(resources)
+    }
+
+    /// 获取资源的关联资源列表
+    /// 返回该资源主动关联的其他资源列表
+    pub async fn get_related_resources(
+        pool: &PgPool,
+        resource_id: Uuid,
+    ) -> Result<Vec<crate::models::RelatedResourceInfo>, ResourceError> {
+        let resources = sqlx::query_as::<_, crate::models::RelatedResourceInfo>(
+            r#"
+            SELECT r.id, r.title, r.resource_type, r.category, r.created_at
+            FROM resources r
+            INNER JOIN resource_relations rr ON r.id = rr.target_resource_id
+            WHERE rr.source_resource_id = $1 AND r.audit_status = 'approved'
+            ORDER BY rr.created_at DESC
+            "#
+        )
+        .bind(resource_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            log::warn!("[Resource] 获取关联资源列表失败 | resource_id={}, error={}", resource_id, e);
+            ResourceError::DatabaseError(e.to_string())
+        })?;
 
         Ok(resources)
     }

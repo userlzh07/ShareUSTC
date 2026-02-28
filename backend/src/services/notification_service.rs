@@ -8,15 +8,6 @@ use crate::models::{
 use crate::services::ResourceError;
 use chrono::NaiveDateTime;
 
-/// 通知已读记录
-#[derive(Debug, sqlx::FromRow)]
-pub struct NotificationRead {
-    pub id: Uuid,
-    pub notification_id: Uuid,
-    pub user_id: Uuid,
-    pub read_at: NaiveDateTime,
-}
-
 /// 带已读状态的通知（查询结果）
 #[derive(Debug, sqlx::FromRow)]
 pub struct NotificationWithReadStatus {

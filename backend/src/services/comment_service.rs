@@ -8,6 +8,24 @@ use crate::services::{NotificationService, ResourceError};
 
 pub struct CommentService;
 
+/// HTML 转义，防止 XSS 攻击
+/// 将特殊字符转换为 HTML 实体
+fn escape_html(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    for c in input.chars() {
+        match c {
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            '&' => result.push_str("&amp;"),
+            '"' => result.push_str("&quot;"),
+            '\'' => result.push_str("&#x27;"),
+            '/' => result.push_str("&#x2F;"),
+            _ => result.push(c),
+        }
+    }
+    result
+}
+
 impl CommentService {
     /// 创建评论
     pub async fn create_comment(
@@ -28,6 +46,9 @@ impl CommentService {
                 "评论内容不能超过1000字".to_string(),
             ));
         }
+
+        // HTML 转义，防止 XSS 攻击
+        let content = escape_html(content);
 
         // 验证资源是否存在
         let resource_exists: bool =

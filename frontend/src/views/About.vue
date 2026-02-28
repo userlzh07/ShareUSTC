@@ -12,7 +12,7 @@
         <section class="section section-left">
           <h2>平台简介</h2>
           <p>ShareUSTC 是一个面向USTC学生的学习资源分享平台，旨在促进校内优质学习资源的共享与传承，打造互助性的学习社区。</p>
-          <p>在这里，你可以找到课程笔记、往年试卷、复习提纲、讲义等各类学习资料，也可以分享自己的学习心得，帮助更多同学。</p>
+          <p>在这里，你可以下载课程笔记、往年试卷、复习提纲、讲义等各类学习资料，也可以分享自己的学习资源，帮助更多同学。</p>
         </section>
 
         <!-- 功能特色 -->
@@ -23,13 +23,13 @@
               <el-icon :size="32" color="#409eff"><Upload /></el-icon>
               <div class="feature-text">
                 <h3>资源分享</h3>
-                <p>上传和下载笔记、试卷、讲义等学习资料</p>
+                <p>上传和下载多种格式的学习资料，支持网页预览</p>
               </div>
             </div>
             <div class="feature-card">
               <el-icon :size="32" color="#67c23a"><Search /></el-icon>
               <div class="feature-text">
-                <h3>智能搜索</h3>
+                <h3>搜索</h3>
                 <p>按课程、类型、标签快速筛选所需资源</p>
               </div>
             </div>
@@ -123,7 +123,7 @@
               <span>加载中</span>
             </div>
             <div v-else-if="contributorsError" class="contributors-error">
-              <span>加载失败，请科学上网后重试</span>
+              <span>加载失败，请科学上网或等一段时间后重试</span>
               <el-button type="primary" size="small" @click="fetchContributors(0)">
                 重新加载
               </el-button>
@@ -162,7 +162,7 @@
       <section class="section">
         <h2>联系我们</h2>
         <p>
-          如有任何问题或建议，欢迎通过 GitHub Issues 与我们交流，也可以添加企鹅群联系我们
+          如有任何问题或建议，欢迎发 Issues 反馈，也可以添加企鹅群联系我们
           <span class="qq-group" @click="copyQQGroup">1084014548</span>
           （点击复制）。
         </p>
@@ -172,6 +172,20 @@
       <section class="section changelog-section">
         <h2>更新日志</h2>
         <div class="changelog-list">
+          <div class="changelog-item">
+            <div class="changelog-date">2026-02-22</div>
+            <div class="changelog-content">
+              <span class="changelog-tag tag-improve">功能优化</span>
+              <span class="changelog-text">允许用户修改资源信息和删除评论</span>
+            </div>
+          </div>
+          <div class="changelog-item">
+            <div class="changelog-date">2026-02-22</div>
+            <div class="changelog-content">
+              <span class="changelog-tag tag-feature">新增功能</span>
+              <span class="changelog-text">新增设置关联资源的功能</span>
+            </div>
+          </div>
           <div class="changelog-item">
             <div class="changelog-date">2026-02-21</div>
             <div class="changelog-content">
@@ -183,7 +197,7 @@
             <div class="changelog-date">2026-02-20</div>
             <div class="changelog-content">
               <span class="changelog-tag tag-improve">功能优化</span>
-              <span class="changelog-text">将文件预览改为从 oss 读取；在浏览器侧缓存文件资源，降低服务器带宽消耗 </span>
+              <span class="changelog-text">将文件预览改为从 oss 读取；在浏览器侧缓存文件资源，降低服务器带宽消耗</span>
             </div>
           </div>
           <div class="changelog-item">
@@ -218,7 +232,7 @@
             <div class="changelog-date">2026-02-13</div>
             <div class="changelog-content">
               <span class="changelog-tag tag-improve">功能优化</span>
-              <span class="changelog-text">将凭据的存储方由 local storage 改为 cookie </span>
+              <span class="changelog-text">将凭据的存储方由 local storage 改为 cookie</span>
             </div>
           </div>
           <div class="changelog-item">

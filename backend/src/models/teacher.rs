@@ -16,27 +16,6 @@ pub struct Teacher {
     pub updated_at: NaiveDateTime,
 }
 
-/// 教师响应 DTO
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TeacherResponse {
-    pub sn: i64,
-    pub name: String,
-    pub department: Option<String>,
-    pub is_active: bool,
-}
-
-impl From<Teacher> for TeacherResponse {
-    fn from(teacher: Teacher) -> Self {
-        Self {
-            sn: teacher.sn,
-            name: teacher.name,
-            department: teacher.department,
-            is_active: teacher.is_active,
-        }
-    }
-}
-
 /// 创建教师请求 DTO
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,5 +136,31 @@ pub struct BatchImportTeachersResult {
 #[serde(rename_all = "camelCase")]
 pub struct FailedTeacherImportItem {
     pub name: String,
+    pub reason: String,
+}
+
+/// 批量删除教师请求 DTO
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDeleteTeachersRequest {
+    /// 编号列表，格式如 "1,2-10,100-200,344"
+    pub sns: String,
+}
+
+/// 批量删除教师结果
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDeleteTeachersResult {
+    pub success_count: i32,
+    pub fail_count: i32,
+    pub not_found_count: i32,
+    pub failed_items: Vec<FailedTeacherDeleteItem>,
+}
+
+/// 删除失败的教师项
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedTeacherDeleteItem {
+    pub sn: i64,
     pub reason: String,
 }

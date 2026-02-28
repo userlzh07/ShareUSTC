@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::db::AppState;
 use crate::models::{
     resource::*, CommentListQuery, CreateCommentRequest, CreateRatingRequest, CurrentUser,
-    UpdateResourceContentRequest,
+    UpdateResourceContentRequest, UpdateResourceRelationsRequest,
 };
 use crate::services::{
     AuditLogService, CommentService, LikeService, RatingService, ResourceError, ResourceService,
@@ -325,16 +325,16 @@ pub async fn get_my_resources(
 #[get("/resources/{resource_id}/download")]
 pub async fn download_resource(
     state: web::Data<AppState>,
-    user: Option<web::ReqData<CurrentUser>>,
+    user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
     req: HttpRequest,
 ) -> impl Responder {
     let resource_id = path.into_inner();
 
-    // 获取资源文件路径和存储类型
-    match ResourceService::get_resource_file_path(&state.pool, resource_id).await {
+    // 获取资源文件路径和存储类型（带权限检查）
+    match ResourceService::get_resource_file_path(&state.pool, resource_id, &user).await {
         Ok((file_path, resource_type, title, storage_type)) => {
-            let user_id = user.as_ref().map(|u| u.id);
+            let user_id = Some(user.id);
             let content_type = crate::services::FileService::get_mime_type_by_type(&resource_type);
             let extension = crate::services::FileService::get_extension_by_type(&resource_type);
             let filename = format!("{}.{}", sanitize_filename(&title), extension);
@@ -425,6 +425,7 @@ pub async fn download_resource(
             );
             match e {
                 ResourceError::NotFound(msg) => not_found(&msg),
+                ResourceError::Unauthorized(msg) => forbidden(&msg),
                 _ => internal_error("获取资源失败"),
             }
         }
@@ -523,12 +524,13 @@ fn build_content_disposition(filename: &str) -> String {
 #[get("/resources/{resource_id}/preview-url")]
 pub async fn get_resource_preview_url(
     state: web::Data<AppState>,
+    user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
 ) -> impl Responder {
     let resource_id = path.into_inner();
 
-    // 获取资源文件路径和存储类型（预览不检查审核状态）
-    match ResourceService::get_resource_file_path_for_preview(&state.pool, resource_id).await {
+    // 获取资源文件路径和存储类型（带权限检查）
+    match ResourceService::get_resource_file_path_for_preview(&state.pool, resource_id, &user).await {
         Ok((file_path, resource_type, storage_type, updated_at)) => {
             let is_oss = storage_type.as_deref() == Some("oss");
 
@@ -584,6 +586,7 @@ pub async fn get_resource_preview_url(
             );
             match e {
                 ResourceError::NotFound(msg) => not_found(&msg),
+                ResourceError::Unauthorized(msg) => forbidden(&msg),
                 _ => internal_error("获取预览链接失败"),
             }
         }
@@ -595,12 +598,13 @@ pub async fn get_resource_preview_url(
 #[get("/resources/{resource_id}/content")]
 pub async fn get_resource_content(
     state: web::Data<AppState>,
+    user: web::ReqData<CurrentUser>,
     path: web::Path<Uuid>,
 ) -> impl Responder {
     let resource_id = path.into_inner();
 
-    // 获取资源文件路径和存储类型（预览不检查审核状态）
-    match ResourceService::get_resource_file_path_for_preview(&state.pool, resource_id).await {
+    // 获取资源文件路径和存储类型（带权限检查）
+    match ResourceService::get_resource_file_path_for_preview(&state.pool, resource_id, &user).await {
         Ok((file_path, resource_type, storage_type, updated_at)) => {
             // 根据资源实际的存储类型选择正确的存储后端读取文件
             // 使用后端代理模式，避免浏览器直接访问 OSS 产生 CORS 问题
@@ -696,6 +700,7 @@ pub async fn get_resource_content(
             );
             match e {
                 ResourceError::NotFound(msg) => not_found(&msg),
+                ResourceError::Unauthorized(msg) => forbidden(&msg),
                 _ => internal_error("获取资源失败"),
             }
         }
@@ -826,11 +831,95 @@ pub async fn get_hot_resources(
     }
 }
 
+/// 资源数量响应
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceCountResponse {
+    pub total: i64,
+}
+
+/// 获取资源总数
+#[get("/resources/count")]
+pub async fn get_resource_count(state: web::Data<AppState>) -> impl Responder {
+    match ResourceService::get_resource_count(&state.pool).await {
+        Ok(count) => HttpResponse::Ok().json(ResourceCountResponse { total: count }),
+        Err(e) => {
+            log::warn!("[Resource] 获取资源总数失败: {}", e);
+            internal_error("获取资源总数失败")
+        }
+    }
+}
+
+/// 搜索可关联的资源
+/// 用于在上传资源时搜索要关联的其他资源
+#[get("/resources/search-for-relation")]
+pub async fn search_resources_for_relation(
+    state: web::Data<AppState>,
+    query: web::Query<ResourceSearchForRelationQuery>,
+) -> impl Responder {
+    // 验证搜索关键词
+    if query.q.trim().is_empty() {
+        return bad_request("搜索关键词不能为空");
+    }
+
+    let exclude_id = query.exclude_id.clone().and_then(|id| Uuid::parse_str(&id).ok());
+
+    match ResourceService::search_resources_for_relation(
+        &state.pool,
+        &query.q,
+        exclude_id,
+        query.limit.unwrap_or(10),
+    )
+    .await
+    {
+        Ok(resources) => HttpResponse::Ok().json(resources),
+        Err(e) => {
+            log::warn!("[Resource] 搜索可关联资源失败 | error={}", e);
+            internal_error("搜索资源失败")
+        }
+    }
+}
+
+/// 获取资源的关联资源列表
+#[get("/resources/{resource_id}/relations")]
+pub async fn get_resource_relations(
+    state: web::Data<AppState>,
+    path: web::Path<Uuid>,
+) -> impl Responder {
+    let resource_id = path.into_inner();
+
+    match ResourceService::get_related_resources(&state.pool, resource_id).await {
+        Ok(resources) => HttpResponse::Ok().json(resources),
+        Err(e) => {
+            log::warn!(
+                "[Resource] 获取关联资源列表失败 | resource_id={}, error={}",
+                resource_id,
+                e
+            );
+            match e {
+                ResourceError::NotFound(msg) => not_found(&msg),
+                _ => internal_error("获取关联资源失败"),
+            }
+        }
+    }
+}
+
+/// 搜索可关联资源的查询参数
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceSearchForRelationQuery {
+    pub q: String,
+    pub exclude_id: Option<String>,
+    pub limit: Option<i32>,
+}
+
 /// 配置公开资源路由（不需要认证）
 pub fn config_public(cfg: &mut web::ServiceConfig) {
     // 注意：具体路径必须放在通配路径之前注册
     // 否则 /resources/hot 会被 /resources/{id} 匹配
     cfg.service(get_hot_resources) // /resources/hot （先注册具体路径）
+        .service(get_resource_count) // /resources/count
+        .service(search_resources_for_relation) // /resources/search-for-relation
         .service(get_resource_list) // /resources
         .service(search_resources) // /resources/search
         .service(get_resource_detail) // /resources/{id} （后注册通配路径）
@@ -839,7 +928,8 @@ pub fn config_public(cfg: &mut web::ServiceConfig) {
         .service(get_resource_preview_url) // OSS 直链预览 URL
         .service(get_like_status) // 获取点赞状态（支持未登录用户）
         .service(get_comments) // 获取评论列表（公开）
-        .service(get_resource_ratings); // 获取资源评分信息（支持未登录用户）
+        .service(get_resource_ratings) // 获取资源评分信息（支持未登录用户）
+        .service(get_resource_relations); // /resources/{id}/relations
 }
 
 /// 提交评分
@@ -1194,6 +1284,88 @@ pub async fn create_comment(
     }
 }
 
+/// 更新资源关联信息
+#[put("/resources/{resource_id}/relations")]
+pub async fn update_resource_relations(
+    state: web::Data<AppState>,
+    user: web::ReqData<CurrentUser>,
+    path: web::Path<Uuid>,
+    request: web::Json<UpdateResourceRelationsRequest>,
+    req: HttpRequest,
+) -> impl Responder {
+    let resource_id = path.into_inner();
+
+    // 获取资源信息（用于权限检查和审计日志）
+    let resource_detail = match ResourceService::get_resource_detail(&state.pool, resource_id).await {
+        Ok(detail) => detail,
+        Err(e) => {
+            log::warn!(
+                "[Resource] 获取资源详情失败 | resource_id={}, user_id={}, error={}",
+                resource_id,
+                user.id,
+                e
+            );
+            return match e {
+                ResourceError::NotFound(msg) => not_found(&msg),
+                _ => internal_error("获取资源详情失败"),
+            };
+        }
+    };
+
+    // 检查权限（上传者或管理员可以修改）
+    if resource_detail.uploader_id != user.id && user.role != crate::models::UserRole::Admin {
+        return forbidden("只有资源上传者或管理员可以修改关联信息");
+    }
+
+    match ResourceService::update_resource_relations(
+        &state.pool,
+        resource_id,
+        request.teacher_sns.clone(),
+        request.course_sns.clone(),
+        request.related_resource_ids.clone(),
+    )
+    .await
+    {
+        Ok(_) => {
+            // 记录审计日志
+            let ip_address = req.peer_addr().map(|addr| addr.ip().to_string());
+            if let Err(e) = AuditLogService::log_update_resource(
+                &state.pool,
+                user.id,
+                resource_id,
+                &resource_detail.title,
+                ip_address.as_deref(),
+            )
+            .await
+            {
+                log::warn!(
+                    "[Audit] 记录资源关联更新日志失败 | resource_id={}, error={}",
+                    resource_id,
+                    e
+                );
+            }
+
+            HttpResponse::Ok().json(serde_json::json!({
+                "message": "关联信息更新成功"
+            }))
+        }
+        Err(e) => {
+            log::warn!(
+                "[Resource] 更新资源关联信息失败 | resource_id={}, user_id={}, error={}",
+                resource_id,
+                user.id,
+                e
+            );
+            match e {
+                ResourceError::NotFound(msg) => not_found(&msg),
+                ResourceError::Unauthorized(msg) => forbidden(&msg),
+                ResourceError::ValidationError(msg) => bad_request(&msg),
+                _ => internal_error("更新关联信息失败"),
+            }
+        }
+    }
+}
+
 /// 配置资源路由（需要认证）
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(upload_resource)
@@ -1205,5 +1377,6 @@ pub fn config(cfg: &mut web::ServiceConfig) {
         .service(toggle_like)
         .service(create_comment)
         .service(update_resource_content)
-        .service(get_resource_raw_content);
+        .service(get_resource_raw_content)
+        .service(update_resource_relations);
 }

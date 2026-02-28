@@ -910,6 +910,49 @@ EXCEPTION
 END $$;
 
 -- ============================================
+-- 18. 资源关联表（资源与资源之间的单向关联关系）
+-- ============================================
+CREATE TABLE IF NOT EXISTS resource_relations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+DO $$
+BEGIN
+    -- source_resource_id: 源资源ID（主动关联其他资源的资源）
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'resource_relations' AND column_name = 'source_resource_id') THEN
+        IF EXISTS (SELECT 1 FROM resource_relations LIMIT 1) THEN
+            ALTER TABLE resource_relations ADD COLUMN source_resource_id UUID REFERENCES resources(id) ON DELETE CASCADE;
+        ELSE
+            ALTER TABLE resource_relations ADD COLUMN source_resource_id UUID NOT NULL REFERENCES resources(id) ON DELETE CASCADE DEFAULT '00000000-0000-0000-0000-000000000000';
+        END IF;
+    END IF;
+
+    -- target_resource_id: 目标资源ID（被关联的资源）
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'resource_relations' AND column_name = 'target_resource_id') THEN
+        IF EXISTS (SELECT 1 FROM resource_relations LIMIT 1) THEN
+            ALTER TABLE resource_relations ADD COLUMN target_resource_id UUID REFERENCES resources(id) ON DELETE CASCADE;
+        ELSE
+            ALTER TABLE resource_relations ADD COLUMN target_resource_id UUID NOT NULL REFERENCES resources(id) ON DELETE CASCADE DEFAULT '00000000-0000-0000-0000-000000000000';
+        END IF;
+    END IF;
+END $$;
+
+-- 添加唯一约束：防止重复关联
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'resource_relations_source_target_key' AND conrelid = 'resource_relations'::regclass
+    ) THEN
+        ALTER TABLE resource_relations ADD CONSTRAINT resource_relations_source_target_key UNIQUE (source_resource_id, target_resource_id);
+    END IF;
+EXCEPTION
+    WHEN unique_violation THEN
+        RAISE NOTICE '无法添加唯一约束：存在重复数据';
+END $$;
+
+-- ============================================
 -- 为现有用户分配 sn（增量更新支持）
 -- ============================================
 DO $$
@@ -1014,6 +1057,10 @@ CREATE INDEX IF NOT EXISTS idx_resource_teachers_teacher ON resource_teachers(te
 CREATE INDEX IF NOT EXISTS idx_resource_courses_resource ON resource_courses(resource_id);
 CREATE INDEX IF NOT EXISTS idx_resource_courses_course ON resource_courses(course_sn);
 
+-- 资源关联表索引
+CREATE INDEX IF NOT EXISTS idx_resource_relations_source ON resource_relations(source_resource_id);
+CREATE INDEX IF NOT EXISTS idx_resource_relations_target ON resource_relations(target_resource_id);
+
 -- ============================================
 -- 创建触发器
 -- ============================================
@@ -1103,7 +1150,9 @@ SELECT 'courses', COUNT(*) FROM information_schema.columns WHERE table_name = 'c
 UNION ALL
 SELECT 'resource_teachers', COUNT(*) FROM information_schema.columns WHERE table_name = 'resource_teachers'
 UNION ALL
-SELECT 'resource_courses', COUNT(*) FROM information_schema.columns WHERE table_name = 'resource_courses';
+SELECT 'resource_courses', COUNT(*) FROM information_schema.columns WHERE table_name = 'resource_courses'
+UNION ALL
+SELECT 'resource_relations', COUNT(*) FROM information_schema.columns WHERE table_name = 'resource_relations';
 '@
 
 # 使用无BOM的UTF-8编码写入文件（psql无法识别带BOM的UTF-8）
@@ -1150,8 +1199,9 @@ Write-Host "  - teachers (授课教师表)"
 Write-Host "  - courses (课程表)"
 Write-Host "  - resource_teachers (资源教师关联表)"
 Write-Host "  - resource_courses (资源课程关联表)"
+Write-Host "  - resource_relations (资源关联表)"
 Write-Host ""
-Write-Host "创建的索引: 40+ 个"
+Write-Host "创建的索引: 42+ 个"
 Write-Host "创建的触发器: 6 个 (自动更新 updated_at)"
 Write-Host ""
 Write-Yellow "说明:"
